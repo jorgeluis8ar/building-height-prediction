@@ -1,0 +1,52 @@
+# Project data
+data_source/data/
+data_sources/data/
+
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux/editor swap files
+*~
+*.swp
+*.swo
+*.swn
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+venv_city_aois/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/staging/
+
+# Julia
+.julia/
+Manifest.toml
+
+# Stata
+*.smcl
+*.stswp
+*.tmp
+
+# Logs and temporary outputs
+*.log
+tmp/
+temp/

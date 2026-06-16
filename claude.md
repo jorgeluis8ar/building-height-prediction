@@ -17,7 +17,7 @@
 # ============================================================
 # Working environment
 # ============================================================
-This project runs via a Claude agent inside a Windows container.
+This project runs via a Claude/Codex agent inside a Windows container.
 Spawning shell processes here is slow, so work efficiently:
 
 - Batch shell commands. Combine related commands into a single
@@ -91,15 +91,9 @@ Each processing task has a program folder and a data folder:
   program reads/writes rather than assuming from the name alone.
 
 ## Inside <code-root>/<task>/
-- The task's program file(s), named <task>_vN with the appropriate
+- The task's program file(s), named <task> with the appropriate
   extension for the language (e.g. .do for Stata, .py for Python),
   plus any run log the language produces.
-- temp/   — temporary/intermediate working files. May stay here;
-  these are NOT pipeline outputs.
-- _old/   — deprecated/superseded code. ALWAYS name this folder
-  exactly "_old" (not _oldcode, old_code, _old_code, etc.). If you
-  encounter an inconsistently-named old-code folder, use _old going
-  forward.
 
 ## Inside data/<task>/
 - source/      — INPUT data. NEVER touch, modify, overwrite, or
@@ -124,48 +118,110 @@ Each processing task has a program folder and a data folder:
   distinction breaks down. In that case, fall back to clear,
   intuitive names rather than forcing the convention.
 
-## The analysis folder
-- The analysis folder (in the existing project, data_processing/
-  analysis/) is UNSTRUCTURED — it does not follow the source/
-  generated task convention. It is where final figures,
-  counterfactuals, and ad hoc analysis live.
-- If it does not exist, create it and leave it EMPTY. Do not impose
-  the pipeline structure on it.
-
 ## Other top-level folders (not part of the processing pipeline)
 - literature/      — reference PDFs. Do not modify.
 - notes/           — project notes.
 - correspondence/  — do not modify.
 
+## Final version of the folder structure
+building-height-prediction/
+├── README.md
+├── PROGRESS.md
+├── data_source/
+│   ├── analysis/
+│   ├── source/
+│   │   ├── acquire_planet_imagery/
+│   │   ├── acquire_overture_priors/
+│   │   ├── acquire_google_2_5d_labels/
+│   │   ├── harmonize_building_labels/
+│   │   ├── build_training_masks/
+│   │   ├── build_training_index/
+│   │   ├── train_height_models/
+│   │   ├── run_inference/
+│   │   ├── validate_predictions/
+│   │   └── benchmark_products/
+│   └── data/
+│       ├── city_aois/
+│       │   ├── source/
+│       │   └── generated/
+│       │       ├── cities_sample.csv
+│       │       ├── city_buffers_5km.geojson
+│       │       └── city_buffers_5km_by_city/
+│       │           ├── chicago_5km.geojson
+│       │           ├── los_angeles_5km.geojson
+│       │           ├── montreal_5km.geojson
+│       │           ├── new_york_city_5km.geojson
+│       │           └── ...
+│       ├── building_footprints/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── height_labels/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── planet_imagery/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── overture_priors/
+│       │   ├── source/
+│       │   │   └── feathers/
+│       │   └── generated/
+│       │       └── masks/
+│       ├── google_2_5d_labels/
+│       │   ├── source/
+│       │   └── generated/
+│       │       └── masks/
+│       ├── training_masks/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── training_index/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── model_configs/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── trained_models/
+│       │   ├── source/
+│       │   └── generated/
+│       │       ├── checkpoints/
+│       │       └── logs/
+│       ├── predictions/
+│       │   ├── source/
+│       │   └── generated/
+│       ├── validation/
+│       │   ├── source/
+│       │   └── generated/
+│       └── benchmark_products/
+│           ├── source/
+│           └── generated/
+│
+├── literature/
+├── notes/
+│   ├── claude.md
+└── correspondence/
+
+- The subfolders in the sources folder are examples, do not create them yet.
+- Create the subfolders in the data folder.
+
 # ============================================================
-# Versioning and restore points (NO git)
+# Version control system
 # ============================================================
-- This project does NOT use git. Do not run git commands.
-- Versions are numbered sequentially: program_v1, program_v2, etc.
+- This project uses git. Before running any git commands, ask for permission.
+- Create a README.md file for each subfolder in the source folder. This file will
+  work as a version control file that logs and tracks the changes to the files within
+  each commit. DO NOT CREATE A README.md file for every script, instead if multiple scripts
+  are in the folder, use headers to separate the changes in each file.
+- Always update this README.md file for each subfolder in the source folder after every commit.
 
-- Do NOT create a new version for every change. Most edits do NOT
-  warrant a new version.
-- Create a new version ONLY for a SUBSTANTIAL change to the logic
-  that would be hard to undo — for example: changing the sequence or
-  structure of the workflow, removing or replacing a major block of
-  logic, or any change you could not easily reverse by hand.
-  In that case follow CRITICAL RULE 1: FIRST move the current
-  version into _old/, THEN create the next number to work in.
-- For SMALL changes — tweaking a loop, renaming variables, adjusting
-  details, fixing a minor bug — do NOT version. Just edit in place
-  and leave a brief dated comment in the code noting what changed.
-- If unsure whether a change is "substantial," ask yourself: if this
-  goes wrong, could I easily undo it? If yes, it's small (comment).
-  If no, it's substantial (version first).
-
-- When you DO create a new version, add a comment header at the top
-  in this form (using the language's comment syntax):
-
-    Updated from program_vN to program_v(N+1) on <date>.
-    Main changes in this version:
-    - <change>
-    - <change>
-    Previous version saved in _old/ as program_vN.
+# ============================================================
+# .gitignore file
+# ============================================================
+- Create a .gitignore file for the whole repository.
+- Restrict every file in the data_sources/data folder. DO NOT COMMIT any data set in this folder.
+- Since we could be running code in python, R, julia, STATA or some other
+  popular statistical sofware, add the extension of the cache files for each of 
+  these programs.
+- Also, the repo will exists in MacOS, Windows and possibel Linux. So, include in 
+  the .gitignore file files like .DS_Store or .*.swp files.
 
 # ============================================================
 # Failure handling (fail loud or fatal)

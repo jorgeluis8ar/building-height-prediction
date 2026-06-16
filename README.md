@@ -29,18 +29,20 @@ The longer-run objective is a worldwide, building-level height dataset.
 
 ### Current Cities
 
-The active project directory contains AOIs and data folders for 27 cities.
-The final estimation and presentation sample will be selected according to
-label quality, geographic coverage, temporal compatibility, urban-form
-diversity, and data licensing.
+The active project directory contains AOIs and data folders for 29 cities with
+ready, partial, or otherwise promising open LiDAR access. The final estimation
+and presentation sample will be selected according to label quality, geographic
+coverage, temporal compatibility, urban-form diversity, data licensing, and
+whether the LiDAR source is raw point-cloud data, a DSM/DTM pair, or a
+LiDAR-derived building-height product.
 
 | Region | Cities |
 |---|---|
-| North America | Chicago, Los Angeles, Montreal, New York City, Seattle |
-| Latin America | Bogota, Buenos Aires, Caracas, Guadalajara, Medellin, Quito, Santiago de Chile, Sao Paulo |
-| Europe | Amsterdam, Helsinki, Lyon, Marseille, Paris, Rotterdam, Utrecht, Vienna, Zurich |
-| Africa | Cape Town, Nairobi |
-| Asia | Jakarta, Singapore, Tokyo |
+| North America | Boston, Chicago, Los Angeles, Montreal, New York City, San Francisco, Seattle, Vancouver |
+| Latin America | Buenos Aires, Guadalajara, Sao Paulo |
+| Europe | Amsterdam, Barcelona, Birmingham, Copenhagen, Helsinki, London, Lyon, Madrid, Manchester, Marseille, Oslo, Paris, Rotterdam, Utrecht, Valencia, Zurich |
+| Africa | Cape Town |
+| Asia | Hong Kong |
 
 ### Principal Data Components
 
@@ -71,6 +73,8 @@ classification, acquisition year, vertical datum, and licensing.
 | Los Angeles | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) | Point clouds and elevation products where covered | Independent validation for LARIAC photogrammetric heights | Confirmed public; coverage must be checked |
 | Chicago | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) Cook County products | Elevation rasters and potentially classified point clouds | Derive roof-to-ground heights after verifying that both surface and terrain information are available | Confirmed public; product type under review |
 | Seattle | [King County LiDAR](https://www5.kingcounty.gov/lidar/) and [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
+| San Francisco | Look for this | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
+| Boston | Look for this | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
 | Amsterdam, Rotterdam, Utrecht | [Actueel Hoogtebestand Nederland](https://www.ahn.nl/open-data) via AHN/PDOK | National point clouds, DSM, and DTM; 3DBAG is derived from BAG and AHN | Validate 3DBAG and independently derive selected heights | Confirmed public |
 | Paris, Lyon, Marseille | [IGN LiDAR HD](https://geoservices.ign.fr/lidarhd) | Classified national point clouds and derived elevation products | Validate BD TOPO heights and measure roof-to-ground height | Confirmed public; local completion must be checked |
 | Helsinki | [Helsinki laser-scanning datasets](https://hri.fi/data/en_GB/dataset/helsingin-laserkeilausaineistot) | Municipal point clouds and elevation products | Validate the Helsinki 3D city model | Confirmed public |
