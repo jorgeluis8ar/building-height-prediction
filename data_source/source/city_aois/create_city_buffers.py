@@ -74,18 +74,18 @@ def relaunch_inside_venv():
 
 relaunch_inside_venv()
 
-# Project paths are written relative to the repository root.
-# Run this script from the repository root with:
-# python data_source/source/city_aois/create_city_buffers.py
-README_FILE = Path("README.md")
-WUP2018_CBD_FILE = Path("data_source/data/city_aois/source/WUP2018-F22-Cities_Over_300K_Annual_V7.xls")
-CITIES_SAMPLE_FILE = Path("data_source/data/city_aois/generated/cities_sample.csv")
-CITY_BUFFERS_FILE = Path("data_source/data/city_aois/generated/city_buffers_5km.geojson")
-CITY_BUFFERS_BY_CITY_DIR = Path("data_source/data/city_aois/generated/city_buffers_5km_by_city")
+# Anchor project paths to this script so the current shell folder cannot send
+# outputs to a different repository or sibling directory.
+PROJECT_ROOT = SCRIPT_DIR.parents[2]
+README_FILE = PROJECT_ROOT / "README.md"
+WUP2018_CBD_FILE = PROJECT_ROOT / "data_source/data/city_aois/source/WUP2018-F22-Cities_Over_300K_Annual_V7.xls"
+CITIES_SAMPLE_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/cities_sample.csv"
+CITY_BUFFERS_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/city_buffers_5km.geojson"
+CITY_BUFFERS_BY_CITY_DIR = PROJECT_ROOT / "data_source/data/city_aois/generated/city_buffers_5km_by_city"
 BUFFER_RADIUS_KM = 5
 CRS_GEOGRAPHIC = "EPSG:4326"
 CRS_PROJECTED = "local_geodesic_5km_buffer"
-FIGURES_DIR = Path("data_source/analysis/figures")
+FIGURES_DIR = PROJECT_ROOT / "data_source/analysis/figures"
 
 CITY_COUNTRIES = {
     "Boston": "United States of America",

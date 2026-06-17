@@ -2,6 +2,22 @@
 data_source/data/
 data_sources/data/
 
+# Local Planet API credentials
+PLANET_API.py
+planet_api.py
+Planet_API.py
+PLANET_API*.py
+planet_api*.py
+*PLANET_API*.py
+*planet_api*.py
+data_source/source/planet_imagery/PLANET_API.py
+data_source/source/planet_imagery/planet_api.py
+data_source/source/planet_imagery/Planet_API.py
+data_source/source/planet_imagery/PLANET_API*.py
+data_source/source/planet_imagery/planet_api*.py
+data_source/source/planet_imagery/*PLANET_API*.py
+data_source/source/planet_imagery/*planet_api*.py
+
 # macOS
 .DS_Store
 ._*

@@ -79,6 +79,29 @@ Last updated: 2026-06-17
   `data_source/source/planet_imagery/requirements.txt`, and updated the Planet
   search script to automatically relaunch inside that local virtual
   environment.
+- Added a building-footprint source-date manifest for Planet scene selection:
+  `data_source/source/planet_imagery/building_footprint_source_dates.csv`.
+- Added `data_source/source/planet_imagery/select_planet_city_scenes.py` and
+  selected two reviewed candidate scenes per current city from
+  `cities_scenes_results_planet.csv`, writing
+  `data_source/data/planet_imagery/generated/selected_planet_city_scenes.csv`.
+- Split Planet imagery acquisition into an asynchronous order/download workflow:
+  - `data_source/source/planet_imagery/order_selected_planet_scenes.py`
+    creates AOI-clipped Planet orders and writes
+    `data_source/data/planet_imagery/generated/planet_orders_manifest.csv`.
+  - `data_source/source/planet_imagery/download_ordered_planet_scenes.py`
+    reads the manifest and downloads only completed orders.
+  - `data_source/source/planet_imagery/download_selected_planet_scenes.py`
+    is now a deprecated guard that exits with instructions.
+- Corrected repository path handling across project scripts. Planet order and
+  download paths are now resolved from the detected
+  `building-height-prediction` repository root and paths outside that root are
+  rejected. The city AOI Python script and Planet analysis R script are also
+  anchored to their detected repository root.
+- Moved the downloaded Boston Planet test order from the mistakenly created
+  `SUMMER 2026 RA/data_source/` tree into
+  `data_source/data/planet_imagery/source/boston/` in this repository and
+  updated the order manifest paths.
 - Created `data_source/source/building_footprints/clip_building_footprints.py`
   to clip each current city's raw building footprints to its 5km AOI.
 - Created `data_source/source/building_footprints/venv_building_footprints/`,
@@ -103,6 +126,12 @@ Last updated: 2026-06-17
   `python3 data_source/source/planet_imagery/search_planet_city_scenes.py`; it
   will use `data_source/source/planet_imagery/venv_planet_imagery/`
   automatically.
+- Planet scene selection can be rerun with
+  `python3 data_source/source/planet_imagery/select_planet_city_scenes.py`.
+- Planet imagery ordering and downloading are now separate. Run
+  `order_selected_planet_scenes.py --dry-run` before `--confirm-order`, then
+  run `download_ordered_planet_scenes.py --dry-run` before
+  `--confirm-download` after orders complete.
 - The building-footprint clipping script can be run with
   `python3 data_source/source/building_footprints/clip_building_footprints.py`;
   it will use

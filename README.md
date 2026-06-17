@@ -131,6 +131,14 @@ observations close to the date of the height labels. The project will test
 whether usable early- and late-day observations exist on the same day or on
 nearby dates; acquisition time and sun geometry will always be retained.
 
+Planet imagery acquisition is split into two reproducible stages. First,
+`order_selected_planet_scenes.py` creates AOI-clipped Planet orders and writes
+`data_source/data/planet_imagery/generated/planet_orders_manifest.csv`. Later,
+`download_ordered_planet_scenes.py` reads that manifest, checks order status,
+and downloads only completed orders to city-specific folders under
+`data_source/data/planet_imagery/source/`. This avoids duplicate orders and
+keeps Planet's asynchronous processing separate from local downloads.
+
 Sentinel-1 SAR and Sentinel-2 optical imagery may provide reproducible
 supplementary features.
 

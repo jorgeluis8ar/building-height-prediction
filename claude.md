@@ -41,6 +41,9 @@ language. When writing code:
 - Always use RELATIVE paths, never absolute paths. (Paths are
   relative to the project, so the pipeline runs regardless of where
   the project folder sits.)
+- Resolve those relative project paths from the script's detected repository
+  root, not from the terminal's current working directory. A script must never
+  write into a sibling folder merely because it was launched from there.
 - Comment generously, at a level suitable for a NOVICE Python
   programmer: explain what each step does and why, not just how.
 
@@ -131,6 +134,15 @@ building-height-prediction/
 │   ├── analysis/
 │   ├── source/
 │   │   ├── acquire_planet_imagery/
+│   │   ├── planet_imagery/
+│   │   │   ├── search_planet_city_scenes.py
+│   │   │   ├── select_planet_city_scenes.py
+│   │   │   ├── order_selected_planet_scenes.py
+│   │   │   ├── download_ordered_planet_scenes.py
+│   │   │   ├── download_selected_planet_scenes.py  # deprecated guard only
+│   │   │   ├── README.md
+│   │   │   ├── requirements.txt
+│   │   │   └── PLANET_API.py  # local only; ignored by Git
 │   │   ├── acquire_overture_priors/
 │   │   ├── acquire_google_2_5d_labels/
 │   │   ├── harmonize_building_labels/
@@ -160,7 +172,12 @@ building-height-prediction/
 │       │   └── generated/
 │       ├── planet_imagery/
 │       │   ├── source/
+│       │   │   └── <city_slug>/
+│       │   │       └── <season>_<scene_id>/
 │       │   └── generated/
+│       │       ├── cities_scenes_results_planet.csv
+│       │       ├── selected_planet_city_scenes.csv
+│       │       └── planet_orders_manifest.csv
 │       ├── overture_priors/
 │       │   ├── source/
 │       │   │   └── feathers/
@@ -201,6 +218,45 @@ building-height-prediction/
 
 - The subfolders in the sources folder are examples, do not create them yet.
 - Create the subfolders in the data folder.
+
+## Planet imagery order/download workflow
+
+Planet imagery uses an asynchronous Orders API workflow. Keep ordering and
+downloading in separate scripts:
+
+```text
+data_source/source/planet_imagery/
+├── search_planet_city_scenes.py
+├── select_planet_city_scenes.py
+├── order_selected_planet_scenes.py
+├── download_ordered_planet_scenes.py
+├── download_selected_planet_scenes.py  # deprecated guard only
+├── PLANET_API.py                       # local only; ignored by Git
+└── README.md
+
+data_source/data/planet_imagery/generated/
+└── planet_orders_manifest.csv
+
+data_source/data/planet_imagery/source/
+└── <city_slug>/
+    └── <season>_<scene_id>/
+```
+
+Rules for this workflow:
+
+- `order_selected_planet_scenes.py` creates AOI-clipped Planet orders and writes
+  `planet_orders_manifest.csv`. It must not download imagery.
+- `download_ordered_planet_scenes.py` reads `planet_orders_manifest.csv`, checks
+  each order state, and downloads only completed orders. It must not create new
+  orders.
+- `download_selected_planet_scenes.py` is kept only as a compatibility guard
+  that exits with instructions. Do not restore all-in-one order/download
+  behavior.
+- Always run `--dry-run` before `--confirm-order` or `--confirm-download`.
+- Never commit `PLANET_API.py`, API keys, OAuth tokens, downloaded imagery, or
+  Planet raw assets.
+- Treat `data_source/data/planet_imagery/source/` as raw data. Do not modify
+  downloaded files manually.
 
 ## City-specific data folders
 

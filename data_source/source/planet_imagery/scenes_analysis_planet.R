@@ -2,8 +2,34 @@ library(dplyr)
 library(ggplot2)
 library(data.table)
 
+## Resolve project paths from this script -----------------
+script_argument <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+if (length(script_argument) != 1) {
+  stop("Run this file with Rscript so the repository root can be detected safely.")
+}
+
+script_path <- normalizePath(
+  sub("^--file=", "", script_argument),
+  mustWork = TRUE
+)
+project_root <- normalizePath(
+  file.path(dirname(script_path), "..", "..", ".."),
+  mustWork = TRUE
+)
+scenes_path <- file.path(
+  project_root,
+  "data_source",
+  "data",
+  "planet_imagery",
+  "generated",
+  "cities_scenes_results_planet.csv"
+)
+if (!file.exists(scenes_path)) {
+  stop(paste("Missing Planet scene results:", scenes_path))
+}
+
 ## Load the data ------------------------------------------
-scenes_data <- fread("/Users/jorgeochoa/Library/CloudStorage/Dropbox-Brown/Jorge Ochoa/Research/building-height-prediction/data_source/data/planet_imagery/generated/cities_scenes_results_planet.csv")
+scenes_data <- fread(scenes_path)
 
 
 ## Creating some variables ----------------------------------
