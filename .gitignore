@@ -29,6 +29,8 @@ __pycache__/
 venv/
 env/
 venv_city_aois/
+venv_planet_imagery/
+venv_building_footprints/
 
 # R
 .Rhistory

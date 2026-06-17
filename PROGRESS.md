@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## Overall Plan
 
@@ -66,6 +66,28 @@ Last updated: 2026-06-16
   execution of `create_city_buffers.py`, pinned `xlrd==2.0.2` in
   `data_source/source/city_aois/requirements.txt`, and updated the script to
   automatically relaunch itself inside that local virtual environment.
+- Created city-specific `source/<city_slug>/` and `generated/<city_slug>/`
+  folders for the 29 current cities under these data domains:
+  `building_footprints`, `planet_imagery`, `height_labels`, `elevation`,
+  `predictions`, `validation`, and `benchmark_products`.
+- Updated `claude.md` to document the domain-first, city-second folder pattern
+  and the current city slugs.
+- Updated `data_source/source/planet_imagery/search_planet_city_scenes.py` to
+  use the README current-city list, city-specific 5km AOI GeoJSON buffers, and
+  a minimum 95% AOI coverage filter for Planet PSScene metadata results.
+- Created `data_source/source/planet_imagery/venv_planet_imagery/`, added
+  `data_source/source/planet_imagery/requirements.txt`, and updated the Planet
+  search script to automatically relaunch inside that local virtual
+  environment.
+- Created `data_source/source/building_footprints/clip_building_footprints.py`
+  to clip each current city's raw building footprints to its 5km AOI.
+- Created `data_source/source/building_footprints/venv_building_footprints/`,
+  added `data_source/source/building_footprints/requirements.txt`, and updated
+  the building-footprint script to automatically relaunch inside that local
+  virtual environment.
+- Ran the building-footprint clipping script for all 29 current cities. Every
+  city now has a non-empty GeoPackage output in:
+  `data_source/data/building_footprints/generated/<city_slug>/<city_slug>_building_footprints_5km.gpkg`.
 
 ## Current Status
 
@@ -77,16 +99,23 @@ Last updated: 2026-06-16
 - The city AOI script can be run with
   `python data_source/source/city_aois/create_city_buffers.py`; it will use
   `data_source/source/city_aois/venv_city_aois/` automatically.
-- No task-specific subfolders have been created inside `data_source/source/`,
-  because `claude.md` says those listed subfolders are examples and should not
-  be created yet.
+- The Planet metadata search script can be run with
+  `python3 data_source/source/planet_imagery/search_planet_city_scenes.py`; it
+  will use `data_source/source/planet_imagery/venv_planet_imagery/`
+  automatically.
+- The building-footprint clipping script can be run with
+  `python3 data_source/source/building_footprints/clip_building_footprints.py`;
+  it will use
+  `data_source/source/building_footprints/venv_building_footprints/`
+  automatically.
+- City-specific data folders now exist locally for each of the 29 current
+  cities across the main city-varying data domains.
+- Task-specific source code currently exists for city AOIs, Planet imagery, and
+  building footprints.
 
 ## Remaining
 
-- Define the first processing task.
-- Create the matching `data_source/source/<task>/` subfolder only when that
-  task is ready.
-- Add task scripts with novice-friendly comments, explicit input checks,
-  fatal failure behavior, and honest dated logs.
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
+- Harmonize clipped building-footprint attributes into the common
+  building-level schema once height-label processing begins.

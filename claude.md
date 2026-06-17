@@ -202,6 +202,65 @@ building-height-prediction/
 - The subfolders in the sources folder are examples, do not create them yet.
 - Create the subfolders in the data folder.
 
+## City-specific data folders
+
+For city-varying data, organize files by data domain first and city second.
+Do not create one top-level folder per city. Instead, create matching city
+folders inside both `source/` and `generated/` for each relevant data domain.
+
+The current city slugs are:
+
+```text
+amsterdam
+barcelona
+birmingham
+boston
+buenos_aires
+cape_town
+chicago
+copenhagen
+guadalajara
+helsinki
+hong_kong
+london
+los_angeles
+lyon
+madrid
+manchester
+marseille
+montreal
+new_york_city
+oslo
+paris
+rotterdam
+san_francisco
+sao_paulo
+seattle
+utrecht
+valencia
+vancouver
+zurich
+```
+
+Use this pattern for domain-specific city inputs and outputs:
+
+```text
+data_source/data/<data_domain>/source/<city_slug>/
+data_source/data/<data_domain>/generated/<city_slug>/
+```
+
+The current city-specific data domains are:
+
+```text
+building_footprints
+planet_imagery
+height_labels
+elevation
+predictions
+validation
+benchmark_products
+```
+
 # ============================================================
 # Version control system
 # ============================================================
