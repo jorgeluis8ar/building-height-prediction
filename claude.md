@@ -143,6 +143,10 @@ building-height-prediction/
 │   │   │   ├── README.md
 │   │   │   ├── requirements.txt
 │   │   │   └── PLANET_API.py  # local only; ignored by Git
+│   │   ├── height_labels/
+│   │   │   ├── download_usgs_3dep_lidar.py
+│   │   │   ├── README.md
+│   │   │   └── requirements.txt
 │   │   ├── acquire_overture_priors/
 │   │   ├── acquire_google_2_5d_labels/
 │   │   ├── harmonize_building_labels/
@@ -257,6 +261,30 @@ Rules for this workflow:
   Planet raw assets.
 - Treat `data_source/data/planet_imagery/source/` as raw data. Do not modify
   downloaded files manually.
+
+## USGS 3DEP LiDAR workflow
+
+U.S. LiDAR source acquisition is managed by:
+
+```text
+data_source/source/height_labels/download_usgs_3dep_lidar.py
+```
+
+Rules for this workflow:
+
+- Query official USGS National Map services rather than maintaining hand-built
+  tile URLs.
+- Download only tiles that intersect a city-specific 5km AOI.
+- Use only the reviewed project directories declared in the script. New York
+  City requires both its New York and New Jersey projects.
+- Always run `--dry-run --estimate-sizes` before `--confirm-download`.
+- Write raw LAZ files under
+  `data_source/data/height_labels/source/<city_slug>/usgs_3dep/<project>/`.
+- Write project and tile manifests under
+  `data_source/data/height_labels/generated/`.
+- Keep downloads resumable and atomic. Never treat `.part` files or
+  byte-size mismatches as complete source data.
+- Treat downloaded LAZ files as immutable raw inputs.
 
 ## City-specific data folders
 
