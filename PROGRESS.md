@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-06-17
+Last updated: 2026-06-24
 
 ## Overall Plan
 
@@ -111,6 +111,98 @@ Last updated: 2026-06-17
 - Ran the building-footprint clipping script for all 29 current cities. Every
   city now has a non-empty GeoPackage output in:
   `data_source/data/building_footprints/generated/<city_slug>/<city_slug>_building_footprints_5km.gpkg`.
+- Added `data_source/source/height_labels/download_usgs_3dep_lidar.py` for
+  reproducible USGS 3DEP project discovery and AOI-filtered LAZ downloads.
+- Created `data_source/source/height_labels/venv_height_labels/`, pinned its
+  dependencies in `requirements.txt`, and documented the workflow in the
+  folder-level `README.md`.
+- Queried the official National Map products API and 3DEP Elevation Index for
+  Boston, Chicago, Los Angeles, New York City, San Francisco, and Seattle.
+- Selected reviewed USGS work units and wrote project/tile inventories to
+  `data_source/data/height_labels/generated/`.
+- Verified 789 unique AOI-intersecting LAZ tiles with a total estimated size of
+  85.09 GiB. No LiDAR files were downloaded during discovery.
+- Downloaded the 68 selected New York City and 99 selected Los Angeles USGS
+  3DEP LAZ tiles. All 167 manifest files pass expected-byte and SHA-256
+  verification, totaling 9.70 GiB.
+- Strengthened the USGS downloader to recover full-size,
+  checksum-matching `.part` files left when cloud synchronization interrupts
+  the final atomic rename.
+- Added
+  `data_source/source/height_labels/LIDAR_BUILDING_HEIGHT_PROCESS.md`, which
+  defines the proposed LiDAR roof-to-local-ground height estimator, DTM/DSM
+  processing stages, point-class filters, quality tiers, temporal checks,
+  validation design, and final building-level schema.
+- Inspected representative New York City and Los Angeles LAZ files. Ground is
+  class 2, while most urban surface returns are class 1; the sample tiles do
+  not provide building class 6, so footprint-masked roof extraction is
+  required.
+- Confirmed that the clipped footprint files contain independent official
+  height fields (`HEIGHT_ROO` for New York City and `HEIGHT` for Los Angeles)
+  that can validate, but must not determine, the LiDAR-derived labels.
+- Reviewed the UT-GLOBUS and Microsoft TEMPO papers and repositories for
+  building-height modeling design choices. Created
+  `notes/NYC_LA_MODEL_TRAINING_PLAN.md` with a concrete NYC/LA training plan
+  that keeps `city x building` as the canonical unit, uses raster imagery chips
+  and masks as model inputs, starts with LiDAR label diagnostics, then proceeds
+  to a tabular baseline and image-chip model.
+- Added `data_source/source/height_labels/derive_lidar_building_heights.py`
+  to compute NYC/LA LiDAR-derived building-height diagnostics from
+  manifest-approved USGS 3DEP LAZ tiles and clipped building footprints.
+  The script writes p50, p75, p90, p95, max-clean height candidates, local
+  ground elevation, official-height comparisons, quality tiers, and
+  training/validation usability flags.
+- Smoke-tested the LiDAR height diagnostic script with three buildings in NYC
+  and three buildings in LA using `--skip-sha256`. Both smoke tests completed
+  cleanly and wrote the expected diagnostic outputs.
+- Ran the default 500-building-per-city NYC/LA LiDAR diagnostic with official
+  footprint height units confirmed as feet and converted to meters. Los Angeles
+  produced 444 training-usable labels out of 500 sampled buildings; New York
+  City produced 464 training-usable labels out of 500 sampled buildings.
+- Added height-label diagnostic documentation, including a step-by-step
+  explanation of `derive_lidar_building_heights.py`, diagnostic metric
+  definitions, and a LiDAR point-classification guide.
+- Created `data_source/source/height_labels/city_crs_reference.csv` with AOI
+  CRS, recommended local metric CRS, and confirmed U.S. LiDAR CRS metadata.
+- Created `data_source/source/height_labels/lidar_sampling_geometry_tikz.tex`
+  as a TikZ schematic for the roof/ground sampling geometry.
+- Generated diagnostic summary-statistics tables and scatter plots under
+  `data_source/data/height_labels/generated/diagnostic_analysis/`.
+- Updated `derive_lidar_building_heights.py` to support repeated simple random
+  diagnostic samples with replacement using `--sample-runs`. The script writes
+  one temporary CSV per run and merges those files into each city's final
+  `building_height_diagnostics_sample.csv`.
+- Ran 15 independent 500-building with-replacement diagnostic samples per city
+  with official height fields confirmed as feet and converted to meters. Los
+  Angeles produced 7,500 sampled rows from 7,165 unique buildings and 6,702
+  training-usable rows; New York City produced 7,500 sampled rows from 6,907
+  unique buildings and 6,989 training-usable rows.
+- Rewrote `data_source/source/height_labels/LiDAR_diagnostics_verification.R`
+  for metric selection and generated summary statistics, city/metric scatter
+  plots, and RMSE-by-height-bin box plots under
+  `data_source/data/height_labels/generated/diagnostic_analysis/metric_selection/`.
+- Updated `derive_lidar_building_heights.py` to enforce a 2.4 m minimum for
+  positive LiDAR-derived heights and to remove the prior upper-height rejection
+  rule. Reran the 15 x 500 with-replacement diagnostics with reproducible seed
+  `20260625` (run seeds `20260625` through `20260639`). Los Angeles produced
+  7,500 sampled rows from 7,172 unique buildings and 6,808 training-usable rows;
+  New York City produced 7,500 sampled rows from 6,929 unique buildings and
+  6,999 training-usable rows. Regenerated the metric-selection plots and tables
+  from this seeded diagnostic run.
+- Updated `LiDAR_diagnostics_verification.R` so nonpositive LiDAR-derived
+  heights are set to missing before metric-selection summaries, scatter plots,
+  and RMSE calculations. Added
+  `lidar_nonpositive_height_cleaning_audit.csv` to document the excluded rows.
+- Finalized the LiDAR label schema in `derive_lidar_building_heights.py`:
+  `height_label_m` is the primary p90 label, `height_p95_m` and
+  `height_max_m` are robustness labels, and `local_ground_m` records the local
+  ground estimate. Ran the all-building pipeline with official height units in
+  feet converted to meters. Los Angeles produced 79,645 footprint rows with
+  71,889 training-usable labels; New York City produced 46,744 footprint rows
+  with 43,486 training-usable labels. Full outputs are stored as
+  `building_height_labels_all.csv`, `height_definition_comparison_all.csv`,
+  `quality_tier_summary_all.csv`, and `lidar_building_heights_all.gpkg` under
+  each city folder in `data_source/data/height_labels/generated/`.
 
 ## Current Status
 
@@ -137,10 +229,19 @@ Last updated: 2026-06-17
   it will use
   `data_source/source/building_footprints/venv_building_footprints/`
   automatically.
+- The USGS LiDAR script can be run with
+  `python3 data_source/source/height_labels/download_usgs_3dep_lidar.py
+  --dry-run --estimate-sizes`; it automatically uses
+  `data_source/source/height_labels/venv_height_labels/`.
+- U.S. 3DEP discovery is complete. New York City and Los Angeles are fully
+  downloaded and verified. The remaining four U.S. cities are still pending.
 - City-specific data folders now exist locally for each of the 29 current
   cities across the main city-varying data domains.
-- Task-specific source code currently exists for city AOIs, Planet imagery, and
-  building footprints.
+- Task-specific source code currently exists for city AOIs, Planet imagery,
+  building footprints, U.S. height-label acquisition, and NYC/LA LiDAR
+  building-height diagnostics.
+- The next modeling plan is documented in
+  `notes/NYC_LA_MODEL_TRAINING_PLAN.md`.
 
 ## Remaining
 
@@ -148,3 +249,5 @@ Last updated: 2026-06-17
   commits, as required by `claude.md`.
 - Harmonize clipped building-footprint attributes into the common
   building-level schema once height-label processing begins.
+- Inspect full-run rejected buildings and extreme residuals before moving to
+  image-chip extraction and model training.

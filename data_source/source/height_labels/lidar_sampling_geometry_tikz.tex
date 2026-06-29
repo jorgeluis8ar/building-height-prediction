@@ -1,0 +1,70 @@
+% TikZ schematic for the LiDAR building-height estimator.
+% Compile inside a LaTeX document that loads:
+% \usepackage{tikz}
+% \usetikzlibrary{arrows.meta,calc,decorations.pathreplacing,positioning}
+
+\begin{tikzpicture}[
+    scale=0.95,
+    every node/.style={font=\small},
+    footprint/.style={draw=black, line width=1.2pt, fill=gray!12},
+    roof/.style={draw=blue!70!black, line width=1.1pt, fill=blue!12},
+    ring/.style={draw=green!45!black, line width=1.0pt, fill=green!10, even odd rule},
+    roofpoint/.style={circle, fill=blue!75!black, draw=white, line width=0.2pt, inner sep=1.5pt},
+    groundpoint/.style={circle, fill=green!55!black, draw=white, line width=0.2pt, inner sep=1.5pt},
+    excludedpoint/.style={circle, fill=orange!80!black, draw=white, line width=0.2pt, inner sep=1.4pt},
+    note/.style={align=left, text width=4.8cm}
+]
+
+% Local ground ring: outer polygon minus inner buffer.
+\path[ring]
+    (-0.9,-0.9) rectangle (5.9,4.4)
+    (0.4,0.4) rectangle (4.6,3.1);
+
+% Original footprint and inward roof sampling polygon.
+\path[footprint] (0,0) rectangle (5,3.5);
+\path[roof] (0.6,0.6) rectangle (4.4,2.9);
+
+% LiDAR roof candidate points inside inward sampling geometry.
+\foreach \x/\y in {
+    1.0/1.0,1.4/2.2,1.8/1.7,2.3/2.5,2.7/1.1,
+    3.1/2.1,3.6/1.5,4.0/2.6,2.0/0.9,3.7/0.9
+} {
+    \node[roofpoint] at (\x,\y) {};
+}
+
+% Ground-class points in the local ring.
+\foreach \x/\y in {
+    -0.4/-0.3,0.8/-0.4,2.1/-0.5,3.3/-0.4,5.4/-0.2,
+    -0.4/1.2,-0.3/2.6,5.3/0.9,5.4/2.2,5.2/3.6,
+    0.8/3.9,2.4/3.8,4.0/3.9
+} {
+    \node[groundpoint] at (\x,\y) {};
+}
+
+% Points deliberately not used in the estimator.
+\foreach \x/\y in {5.1/1.5,4.9/2.9,-0.1/3.4} {
+    \node[excludedpoint] at (\x,\y) {};
+}
+
+% Labels on the geometry.
+\node[align=center] at (2.5,3.85) {local ground ring\\1 m to 5 m outside footprint};
+\node[align=center, blue!70!black] at (2.5,1.75) {inward roof sampling polygon\\1 m inside footprint};
+\node[align=center] at (2.5,-0.85) {original building footprint};
+
+% Legend.
+\node[roofpoint, label=right:{roof candidate LiDAR point}] at (7.0,3.8) {};
+\node[groundpoint, label=right:{ground-class LiDAR point}] at (7.0,3.35) {};
+\node[excludedpoint, label=right:{ignored edge/noise/neighbor point}] at (7.0,2.9) {};
+
+% Height calculation panel.
+\node[note] at (8.8,1.25) {
+Estimator for one building:\\[2pt]
+$z_\mathrm{roof,p90} = \mathrm{P90}(z_i \in \mathrm{roof\ polygon})$\\
+$z_\mathrm{ground} = \mathrm{median}(z_j \in \mathrm{ground\ ring})$\\[2pt]
+$\mathrm{height}_{p90} = z_\mathrm{roof,p90} - z_\mathrm{ground}$
+};
+
+\draw[-{Latex[length=2mm]}, thick, blue!70!black] (4.5,2.2) -- (6.2,1.7);
+\draw[-{Latex[length=2mm]}, thick, green!45!black] (5.8,3.6) -- (6.2,1.25);
+
+\end{tikzpicture}

@@ -73,8 +73,8 @@ classification, acquisition year, vertical datum, and licensing.
 | Los Angeles | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) | Point clouds and elevation products where covered | Independent validation for LARIAC photogrammetric heights | Confirmed public; coverage must be checked |
 | Chicago | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) Cook County products | Elevation rasters and potentially classified point clouds | Derive roof-to-ground heights after verifying that both surface and terrain information are available | Confirmed public; product type under review |
 | Seattle | [King County LiDAR](https://www5.kingcounty.gov/lidar/) and [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
-| San Francisco | Look for this | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
-| Boston | Look for this | Point clouds, terrain, and elevation products | Derive building heights with explicit terrain correction | Confirmed public |
+| San Francisco | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program), project `CA_SanFrancisco_B23` | 2023 QL0 classified point clouds | Derive building heights with explicit terrain correction | Confirmed public; complete 5km AOI coverage |
+| Boston | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program), project `MA_CentralEastern_2021_B21` | 2021 QL1 classified point clouds | Derive building heights with explicit terrain correction | Confirmed public; complete 5km AOI coverage |
 | Amsterdam, Rotterdam, Utrecht | [Actueel Hoogtebestand Nederland](https://www.ahn.nl/open-data) via AHN/PDOK | National point clouds, DSM, and DTM; 3DBAG is derived from BAG and AHN | Validate 3DBAG and independently derive selected heights | Confirmed public |
 | Paris, Lyon, Marseille | [IGN LiDAR HD](https://geoservices.ign.fr/lidarhd) | Classified national point clouds and derived elevation products | Validate BD TOPO heights and measure roof-to-ground height | Confirmed public; local completion must be checked |
 | Helsinki | [Helsinki laser-scanning datasets](https://hri.fi/data/en_GB/dataset/helsingin-laserkeilausaineistot) | Municipal point clouds and elevation products | Validate the Helsinki 3D city model | Confirmed public |
@@ -142,7 +142,38 @@ keeps Planet's asynchronous processing separate from local downloads.
 Sentinel-1 SAR and Sentinel-2 optical imagery may provide reproducible
 supplementary features.
 
-### 4. Construct Building-Level Features
+### 4. Acquire U.S. LiDAR Height Labels
+
+USGS 3DEP LiDAR acquisition is handled by
+`data_source/source/height_labels/download_usgs_3dep_lidar.py`. The script
+queries the official National Map products API and 3DEP Elevation Index,
+selects reviewed project work units, and retains only LAZ tiles whose bounding
+boxes intersect each city's actual 5km GeoJSON AOI.
+
+The current U.S. selection contains 789 tiles across Boston, Chicago, Los
+Angeles, New York City, San Francisco, and Seattle. The estimated compressed
+download size is 85.09 GiB. New York City's AOI requires both the New York and
+New Jersey Sandy LiDAR projects. Chicago has 97.63% point-cloud coverage
+because part of the circular AOI extends into Lake Michigan; all other U.S.
+city AOIs have complete selected-project coverage.
+
+Project and tile inventories are written to:
+
+```text
+data_source/data/height_labels/generated/usgs_3dep_projects.csv
+data_source/data/height_labels/generated/usgs_3dep_tile_manifest.csv
+```
+
+Raw LAZ tiles are stored by city and USGS project under:
+
+```text
+data_source/data/height_labels/source/<city_slug>/usgs_3dep/<project_name>/
+```
+
+The workflow must be run with `--dry-run --estimate-sizes` before
+`--confirm-download`.
+
+### 5. Construct Building-Level Features
 
 Features will be aggregated within each footprint and its surrounding context:
 
@@ -155,7 +186,7 @@ Features will be aggregated within each footprint and its surrounding context:
 - surrounding built density and neighboring-building morphology; and
 - terrain, slope, and elevation context.
 
-### 5. Estimate Models
+### 6. Estimate Models
 
 The first model is a tabular gradient-boosting baseline using LightGBM or
 XGBoost. It predicts a continuous building height from geometry, spectral,
@@ -167,7 +198,7 @@ architectures include convolutional neural networks and transformer-based
 encoders such as SegFormer. Quantile models or ensembles will provide
 prediction intervals.
 
-### 6. Benchmark Existing Products
+### 7. Benchmark Existing Products
 
 Microsoft TEMPO, GlobalBuildingAtlas, WSF3D, GHS-BUILT-H, Overture, and
 OpenBuildingMap will be spatially matched to the validation buildings.

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -66,6 +67,7 @@ def relaunch_inside_venv() -> None:
 
 relaunch_inside_venv()
 
+import httpx
 import pandas as pd
 from planet import Auth, Session
 from planet.clients import OrdersClient
@@ -73,6 +75,8 @@ from planet.clients import OrdersClient
 
 READY_STATES = {"success", "partial"}
 NOT_READY_STATES = {"queued", "running"}
+DOWNLOAD_ATTEMPTS = 3
+STATUS_ATTEMPTS = 3
 MANIFEST_COLUMNS = [
     "city_slug",
     "selection_season",
@@ -198,6 +202,52 @@ def joined_paths(paths: list[Any]) -> str:
     return ";".join(str(path) for path in paths)
 
 
+def recorded_download_exists(row: pd.Series) -> bool:
+    """Return True when every file recorded for an earlier download still exists."""
+    recorded_paths = [
+        value.strip()
+        for value in str(row.get("downloaded_files", "")).split(";")
+        if value.strip()
+    ]
+    if not recorded_paths:
+        output_dir = resolve_project_path(Path(str(row.get("output_dir", ""))))
+        for planet_manifest_path in output_dir.glob("*/manifest.json"):
+            try:
+                planet_manifest = json.loads(
+                    planet_manifest_path.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+            expected_files = [
+                planet_manifest_path.parent / entry["path"]
+                for entry in planet_manifest.get("files", [])
+                if entry.get("path")
+            ]
+            if expected_files and all(path.is_file() for path in expected_files):
+                return True
+        return False
+    return all(resolve_project_path(Path(value)).is_file() for value in recorded_paths)
+
+
+async def get_order_with_retries(
+    orders_client: OrdersClient,
+    order_id: str,
+) -> dict[str, Any] | None:
+    """Fetch an order while tolerating temporary Planet connection failures."""
+    for attempt in range(1, STATUS_ATTEMPTS + 1):
+        try:
+            return await orders_client.get_order(order_id)
+        except httpx.HTTPError as error:
+            print(
+                f"  status_error={type(error).__name__} "
+                f"attempt={attempt}/{STATUS_ATTEMPTS}",
+                flush=True,
+            )
+            if attempt < STATUS_ATTEMPTS:
+                await asyncio.sleep(5 * attempt)
+    return None
+
+
 async def async_main() -> None:
     args = parse_args()
     args.manifest = resolve_project_path(args.manifest)
@@ -224,7 +274,19 @@ async def async_main() -> None:
             if not order_id:
                 raise ValueError(f"Manifest row {index} is missing order_id")
 
-            order = await orders_client.get_order(order_id)
+            order = await get_order_with_retries(orders_client, order_id)
+            if order is None:
+                manifest.loc[index, "download_status"] = "status_check_failed_after_retries"
+                manifest.loc[index, "download_checked_on"] = pd.Timestamp.now("UTC").isoformat()
+                write_manifest(args.manifest, manifest)
+                print(
+                    f"{row['city_slug']} {row['selection_season']} "
+                    f"{row['scene_id']} order={order_id}",
+                    flush=True,
+                )
+                print("  skipped: order status check exhausted retries", flush=True)
+                continue
+
             state = str(order.get("state", ""))
             manifest.loc[index, "order_state"] = state
             manifest.loc[index, "created_on"] = order.get("created_on", row.get("created_on", ""))
@@ -237,35 +299,69 @@ async def async_main() -> None:
             )
             print(label, flush=True)
 
+            if recorded_download_exists(row) and not args.overwrite:
+                manifest.loc[index, "download_status"] = "downloaded"
+                write_manifest(args.manifest, manifest)
+                print("  skipped: all previously downloaded files exist", flush=True)
+                continue
+
             if state in NOT_READY_STATES:
                 manifest.loc[index, "download_status"] = "not_ready"
+                write_manifest(args.manifest, manifest)
                 print("  skipped: order is not complete yet", flush=True)
                 continue
             if state not in READY_STATES:
                 manifest.loc[index, "download_status"] = f"not_downloaded_state_{state}"
+                write_manifest(args.manifest, manifest)
                 print("  skipped: order is not in a downloadable state", flush=True)
                 continue
             if args.dry_run:
                 manifest.loc[index, "download_status"] = "ready_dry_run"
+                write_manifest(args.manifest, manifest)
                 print("  ready: dry run only", flush=True)
                 continue
 
             output_dir = resolve_project_path(Path(str(row["output_dir"])))
             manifest.loc[index, "output_dir"] = project_relative_path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
-            downloaded_paths = await orders_client.download_order(
-                order_id,
-                directory=output_dir,
-                overwrite=args.overwrite,
-                progress_bar=True,
-            )
+            downloaded_paths = None
+            for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+                try:
+                    print(
+                        f"  download_attempt={attempt}/{DOWNLOAD_ATTEMPTS}",
+                        flush=True,
+                    )
+                    downloaded_paths = await orders_client.download_order(
+                        order_id,
+                        directory=output_dir,
+                        # A prior interrupted attempt may have left partial files.
+                        # Complete orders were already skipped above, so replacing
+                        # files here is safe and prevents silent partial downloads.
+                        overwrite=True,
+                        progress_bar=False,
+                    )
+                    break
+                except httpx.HTTPError as error:
+                    print(
+                        f"  transient_download_error={type(error).__name__}",
+                        flush=True,
+                    )
+                    if attempt < DOWNLOAD_ATTEMPTS:
+                        await asyncio.sleep(5 * attempt)
+
+            if downloaded_paths is None:
+                manifest.loc[index, "download_status"] = "download_failed_after_retries"
+                write_manifest(args.manifest, manifest)
+                print("  failed: exhausted download retries; continuing", flush=True)
+                continue
+
             manifest.loc[index, "download_status"] = "downloaded"
             manifest.loc[index, "downloaded_files"] = joined_paths(
                 [project_relative_path(Path(path)) for path in downloaded_paths]
             )
+            write_manifest(args.manifest, manifest)
             print(f"  downloaded_files={len(downloaded_paths)}", flush=True)
 
-    write_manifest(args.manifest, manifest)
     print(f"UPDATED {args.manifest}", flush=True)
 
 

@@ -1,0 +1,1 @@
+df <- fread('/Users/jorgeochoa/Library/CloudStorage/Dropbox-Brown/Jorge Ochoa/Research/building-height-prediction/data_source/data/height_labels/generated/los_angeles/building_height_diagnostics_sample.csv')
