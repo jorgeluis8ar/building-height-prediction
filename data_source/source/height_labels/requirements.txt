@@ -6,3 +6,4 @@ lazrs==0.7.0
 geopandas==1.1.3
 pyogrio==0.12.1
 matplotlib==3.11.0
+rasterio==1.5.0

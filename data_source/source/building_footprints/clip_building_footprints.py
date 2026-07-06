@@ -1,5 +1,5 @@
 """
-Clip Building Footprints
+Select 5km-Intersecting Building Footprints
 
 Environment: data_source/source/building_footprints/venv_building_footprints
 
@@ -14,8 +14,9 @@ Produces (outputs for later stages):
 
 Description:
     Reads each current city from README.md, loads the raw building-footprint
-    source file for that city, clips the footprints to the city's 5km AOI, and
-    writes every city's processed footprint file in the same GeoPackage format.
+    source file for that city, selects every footprint that intersects the
+    city's 5km AOI, preserves the full original footprint geometry, and writes
+    every city's processed footprint file in the same GeoPackage format.
 
 Usage:
     python3 data_source/source/building_footprints/clip_building_footprints.py
@@ -107,8 +108,9 @@ def parse_args() -> argparse.Namespace:
     project_root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser(
         description=(
-            "Clip raw city building footprints to the current 5km city AOIs "
-            "and write every processed output as GeoPackage."
+            "Select raw city building footprints that intersect the current "
+            "5km city AOIs, preserve full footprint geometry, and write every "
+            "processed output as GeoPackage."
         )
     )
     parser.add_argument(
@@ -157,7 +159,7 @@ def current_city_slugs_from_readme(readme_path: Path) -> list[str]:
     Read the active city list from the README Current Cities table.
 
     The README is the project-facing source of truth. Reading it here prevents
-    old or experimental cities from being clipped accidentally.
+    old or experimental cities from being processed accidentally.
     """
     if not readme_path.exists():
         raise FileNotFoundError(f"Missing README file: {readme_path}")
@@ -270,12 +272,12 @@ def read_and_clip_candidate(
     city_slug: str,
 ) -> tuple[gpd.GeoDataFrame, list[dict]]:
     """
-    Read one source dataset and clip all polygon features to the city AOI.
+    Read one source dataset and select full polygons intersecting the city AOI.
 
     Each layer is attempted separately. Failures are returned as summary rows
     so the final log can explain exactly what happened.
     """
-    clipped_layers: list[gpd.GeoDataFrame] = []
+    selected_layers: list[gpd.GeoDataFrame] = []
     layer_summaries: list[dict] = []
 
     try:
@@ -342,12 +344,14 @@ def read_and_clip_candidate(
             continue
 
         source_gdf = source_gdf.to_crs(aoi.crs)
-        clipped = gpd.clip(source_gdf, aoi, keep_geom_type=True)
-        clipped = clipped[clipped.geometry.notna()].copy()
-        clipped = clipped[~clipped.geometry.is_empty].copy()
-        clipped_count = len(clipped)
+        aoi_geometry = aoi.geometry.union_all()
+        intersects_aoi = source_gdf.geometry.intersects(aoi_geometry)
+        selected = source_gdf[intersects_aoi].copy()
+        selected = selected[selected.geometry.notna()].copy()
+        selected = selected[~selected.geometry.is_empty].copy()
+        selected_count = len(selected)
 
-        if clipped_count == 0:
+        if selected_count == 0:
             layer_summaries.append(
                 layer_summary(
                     city_slug,
@@ -361,26 +365,27 @@ def read_and_clip_candidate(
             )
             continue
 
-        clipped["city_slug"] = city_slug
-        clipped["source_dataset"] = source_path.name
-        clipped["source_layer"] = layer_label
-        clipped_layers.append(clipped)
+        selected["city_slug"] = city_slug
+        selected["source_dataset"] = source_path.name
+        selected["source_layer"] = layer_label
+        selected["aoi_selection_rule"] = "intersects_5km_aoi_preserve_full_geometry"
+        selected_layers.append(selected)
         layer_summaries.append(
             layer_summary(
                 city_slug,
                 source_path,
                 layer_label,
-                "clipped",
+                "selected_intersecting",
                 source_count,
-                clipped_count,
+                selected_count,
                 "",
             )
         )
 
-    if not clipped_layers:
+    if not selected_layers:
         return gpd.GeoDataFrame(), layer_summaries
 
-    combined = pd.concat(clipped_layers, ignore_index=True)
+    combined = pd.concat(selected_layers, ignore_index=True)
     return gpd.GeoDataFrame(combined, geometry="geometry", crs=aoi.crs), layer_summaries
 
 
@@ -390,7 +395,7 @@ def layer_summary(
     layer: str | None,
     status: str,
     source_features: int,
-    clipped_features: int,
+    selected_features: int,
     message: str,
 ) -> dict:
     return {
@@ -399,7 +404,7 @@ def layer_summary(
         "source_layer": layer or "",
         "status": status,
         "source_features": source_features,
-        "clipped_features": clipped_features,
+        "selected_features": selected_features,
         "message": message,
     }
 
@@ -453,7 +458,7 @@ def write_summary(summary_rows: Iterable[dict], output_path: Path) -> None:
         "source_layer",
         "status",
         "source_features",
-        "clipped_features",
+        "selected_features",
         "message",
     ]
     temporary_path = output_path.with_suffix(".tmp.csv")
@@ -486,7 +491,7 @@ def main() -> None:
     all_summary_rows: list[dict] = []
     failed_cities: list[str] = []
 
-    print(f"Clipping building footprints for {len(city_slugs)} cities.")
+    print(f"Selecting AOI-intersecting building footprints for {len(city_slugs)} cities.")
     print(f"Output format: {OUTPUT_DRIVER} ({OUTPUT_SUFFIX})")
 
     for city_number, city_slug in enumerate(city_slugs, start=1):
@@ -519,19 +524,19 @@ def main() -> None:
             continue
 
         aoi = load_aoi(aoi_path)
-        city_clipped_layers: list[gpd.GeoDataFrame] = []
+        city_selected_layers: list[gpd.GeoDataFrame] = []
 
         for source_path in candidates:
-            clipped, source_summary_rows = read_and_clip_candidate(
+            selected, source_summary_rows = read_and_clip_candidate(
                 source_path=source_path,
                 aoi=aoi,
                 city_slug=city_slug,
             )
             all_summary_rows.extend(source_summary_rows)
-            if not clipped.empty:
-                city_clipped_layers.append(clipped)
+            if not selected.empty:
+                city_selected_layers.append(selected)
 
-        if not city_clipped_layers:
+        if not city_selected_layers:
             if args.allow_empty:
                 city_result = gpd.GeoDataFrame(
                     {"city_slug": pd.Series(dtype="str")},
@@ -539,11 +544,11 @@ def main() -> None:
                 )
             else:
                 failed_cities.append(city_slug)
-                print(f"  ERROR: no clipped building footprints produced for {city_slug}")
+                print(f"  ERROR: no AOI-intersecting building footprints produced for {city_slug}")
                 continue
         else:
             city_result = gpd.GeoDataFrame(
-                pd.concat(city_clipped_layers, ignore_index=True),
+                pd.concat(city_selected_layers, ignore_index=True),
                 geometry="geometry",
                 crs=aoi.crs,
             )
@@ -578,7 +583,7 @@ def main() -> None:
             f"See {summary_path} for details. Elapsed: {elapsed:.1f}s"
         )
 
-    print(f"SUCCESS: clipped {len(city_slugs)} city/cities in {elapsed:.1f}s")
+    print(f"SUCCESS: selected footprints for {len(city_slugs)} city/cities in {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

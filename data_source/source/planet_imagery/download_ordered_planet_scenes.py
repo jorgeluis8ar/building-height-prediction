@@ -159,6 +159,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Optional cap for testing a small number of manifest rows.",
     )
+    parser.add_argument(
+        "--scene-id",
+        action="append",
+        dest="scene_ids",
+        help="Limit the run to one scene ID. May be supplied more than once.",
+    )
     return parser.parse_args()
 
 
@@ -259,6 +265,19 @@ async def async_main() -> None:
 
     manifest = load_manifest(args.manifest)
     row_indexes = list(manifest.index)
+    if args.scene_ids:
+        requested_scene_ids = set(args.scene_ids)
+        row_indexes = [
+            index
+            for index in row_indexes
+            if str(manifest.loc[index, "scene_id"]) in requested_scene_ids
+        ]
+        found_scene_ids = set(manifest.loc[row_indexes, "scene_id"].astype(str))
+        missing_scene_ids = requested_scene_ids - found_scene_ids
+        if missing_scene_ids:
+            raise SystemExit(
+                f"Scene ID(s) not found in manifest: {sorted(missing_scene_ids)}"
+            )
     if args.max_orders is not None:
         row_indexes = row_indexes[: args.max_orders]
 

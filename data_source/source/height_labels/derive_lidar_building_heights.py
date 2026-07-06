@@ -9,6 +9,9 @@ Requires (inputs from earlier stages):
     - data_source/data/building_footprints/generated/<city_slug>/
       <city_slug>_building_footprints_5km.gpkg
       (produced by clip_building_footprints.py)
+    - optionally data_source/data/building_footprints/generated/<city_slug>/
+      <city_slug>_building_footprints_merged_5km.gpkg
+      (produced by merge_contiguous_footprints.py)
     - data_source/data/height_labels/source/<city_slug>/usgs_3dep/
       <project_name>/*.laz
       (produced by download_usgs_3dep_lidar.py)
@@ -37,6 +40,7 @@ Usage:
     python3 data_source/source/height_labels/derive_lidar_building_heights.py --sample-size 100
     python3 data_source/source/height_labels/derive_lidar_building_heights.py --sample-runs 15
     python3 data_source/source/height_labels/derive_lidar_building_heights.py --all-buildings
+    python3 data_source/source/height_labels/derive_lidar_building_heights.py --all-buildings --footprint-source merged
 """
 
 from __future__ import annotations
@@ -84,6 +88,8 @@ GROUND_CLASSES = {2}
 EXCLUDED_CLASSES = {7, 9, 17, 18}
 HEIGHT_DEFINITION = "lidar_ndsm_roof_p90_minus_local_ground"
 MIN_NONZERO_BUILDING_HEIGHT_M = 2.4
+ORIGINAL_FOOTPRINT_SOURCE = "original"
+MERGED_FOOTPRINT_SOURCE = "merged"
 
 
 def relaunch_inside_venv() -> None:
@@ -138,6 +144,15 @@ def parse_args() -> argparse.Namespace:
         "--all-buildings",
         action="store_true",
         help="Process every footprint instead of the diagnostic sample.",
+    )
+    parser.add_argument(
+        "--footprint-source",
+        choices=[ORIGINAL_FOOTPRINT_SOURCE, MERGED_FOOTPRINT_SOURCE],
+        default=ORIGINAL_FOOTPRINT_SOURCE,
+        help=(
+            "Footprint layer to process. Use 'merged' for contiguous-footprint "
+            "outputs from merge_contiguous_footprints.py. Default: original."
+        ),
     )
     parser.add_argument(
         "--sample-runs",
@@ -285,8 +300,10 @@ def enforce_minimum_nonzero_height(height_m: float) -> float:
     return height_m
 
 
-def temporal_mismatch_reason(city_slug: str, building: Any) -> str:
+def temporal_mismatch_reason(city_slug: str, building: Any, footprint_source: str) -> str:
     """Flag buildings whose footprint date conflicts with the LiDAR date."""
+    if footprint_source == MERGED_FOOTPRINT_SOURCE:
+        return ""
     if city_slug == "new_york_city":
         construction_year = safe_numeric(building.get("CONSTRUCTI"))
         if construction_year is not None and construction_year > 2014:
@@ -299,6 +316,14 @@ def temporal_mismatch_reason(city_slug: str, building: Any) -> str:
         if source_year is not None and source_year > 2024:
             return "footprint_date_after_lidar"
     return ""
+
+
+def output_suffix(args: argparse.Namespace) -> str:
+    """Return the output filename suffix for this run configuration."""
+    suffix = "_all" if args.all_buildings else ""
+    if args.footprint_source == MERGED_FOOTPRINT_SOURCE:
+        return f"_merged{suffix}"
+    return suffix
 
 
 @dataclass
@@ -426,35 +451,96 @@ def write_tile_inventory(deps: dict[str, Any], manifest: Any, validation_rows: A
     logging.info("Wrote tile inventory: %s", relative_project_path(output_path))
 
 
-def load_city_footprints(deps: dict[str, Any], city_slug: str) -> Any:
-    """Read, validate, and repair one city's clipped footprint file."""
+def load_city_footprints(deps: dict[str, Any], city_slug: str, args: argparse.Namespace) -> Any:
+    """Read, validate, and repair one city's footprint file."""
     gpd = deps["gpd"]
     make_valid = deps["make_valid"]
+    if args.footprint_source == MERGED_FOOTPRINT_SOURCE:
+        filename = f"{city_slug}_building_footprints_merged_5km.gpkg"
+        required_id = "merged_building_footprint_id"
+        description = f"{city_slug} merged building footprints"
+    else:
+        filename = f"{city_slug}_building_footprints_5km.gpkg"
+        required_id = "building_footprint_id"
+        description = f"{city_slug} AOI-selected building footprints"
+
     path = project_path(
         "data_source",
         "data",
         "building_footprints",
         "generated",
         city_slug,
-        f"{city_slug}_building_footprints_5km.gpkg",
+        filename,
     )
-    require_file(path, f"{city_slug} clipped building footprints")
+    require_file(path, description)
     footprints = gpd.read_file(path)
     if footprints.empty:
         raise ValueError(f"No footprints found in {path}")
-    if "building_footprint_id" not in footprints.columns:
-        raise ValueError(f"Missing building_footprint_id column in {path}")
+    if required_id not in footprints.columns:
+        raise ValueError(f"Missing {required_id} column in {path}")
+    if required_id != "building_footprint_id":
+        footprints = footprints.rename(columns={required_id: "building_footprint_id"})
 
-    official_field = CITY_CONFIG[city_slug]["official_height_field"]
-    if official_field not in footprints.columns:
-        raise ValueError(f"Missing official height field {official_field} in {path}")
+    if args.footprint_source == MERGED_FOOTPRINT_SOURCE:
+        official_field = "official_height_area_weighted_m"
+        if official_field not in footprints.columns:
+            raise ValueError(f"Missing merged official height field {official_field} in {path}")
+    else:
+        official_field = CITY_CONFIG[city_slug]["official_height_field"]
+        if official_field not in footprints.columns:
+            raise ValueError(f"Missing official height field {official_field} in {path}")
 
     footprints = footprints.copy()
+    footprints["footprint_source"] = args.footprint_source
+    footprints["footprint_source_path"] = relative_project_path(path)
     footprints["geometry"] = footprints.geometry.map(make_valid)
     footprints = footprints[~footprints.geometry.is_empty & footprints.geometry.notna()].copy()
     if footprints.empty:
         raise ValueError(f"All footprints became empty after geometry repair: {path}")
     return footprints
+
+
+def official_height_record(city_slug: str, building: Any, args: argparse.Namespace) -> dict[str, Any]:
+    """Return official height and ground metadata for one footprint row."""
+    if args.footprint_source == MERGED_FOOTPRINT_SOURCE:
+        official_height_raw = building.get("official_height_area_weighted_m")
+        official_height_m = safe_numeric(official_height_raw)
+        official_ground_raw = building.get("official_ground_area_weighted_m")
+        return {
+            "official_height_source": building.get("official_height_source") or "merged_official_height",
+            "official_height_raw": official_height_raw,
+            "official_height_units": "meters",
+            "official_height_units_confirmed": True,
+            "official_height_m": official_height_m,
+            "official_height_aggregation": "area_weighted",
+            "official_height_n": building.get("official_height_n"),
+            "official_ground_source": building.get("official_ground_source") or "merged_official_ground",
+            "official_ground_raw": official_ground_raw,
+            "official_ground_units": "meters",
+            "official_ground_aggregation": "area_weighted",
+            "official_ground_n": building.get("official_ground_n"),
+        }
+
+    official_field = CITY_CONFIG[city_slug]["official_height_field"]
+    official_height_m = official_height_to_meters(
+        building.get(official_field),
+        args.official_height_units,
+    )
+    ground_field = CITY_CONFIG[city_slug]["official_ground_field"]
+    return {
+        "official_height_source": official_field,
+        "official_height_raw": building.get(official_field),
+        "official_height_units": args.official_height_units,
+        "official_height_units_confirmed": bool(args.official_units_confirmed),
+        "official_height_m": official_height_m,
+        "official_height_aggregation": "source_row",
+        "official_height_n": 1 if official_height_m is not None else 0,
+        "official_ground_source": ground_field,
+        "official_ground_raw": building.get(ground_field),
+        "official_ground_units": args.official_height_units,
+        "official_ground_aggregation": "source_row",
+        "official_ground_n": 1 if safe_numeric(building.get(ground_field)) is not None else 0,
+    }
 
 
 def choose_buildings(deps: dict[str, Any], footprints: Any, city_slug: str, args: argparse.Namespace) -> Any:
@@ -625,35 +711,30 @@ def process_city(
     box = deps["box"]
     logging.info("Processing city: %s", city_slug)
 
-    footprints = load_city_footprints(deps, city_slug)
+    footprints = load_city_footprints(deps, city_slug, args)
     selected = choose_buildings(deps, footprints, city_slug, args)
     projected = prepare_projected_geometries(deps, footprints, selected, city_slug)
 
     records: dict[str, dict[str, Any]] = {}
     for _, building in projected.iterrows():
         building_id = building["building_footprint_id"]
-        official_field = CITY_CONFIG[city_slug]["official_height_field"]
-        official_height_m = official_height_to_meters(
-            building.get(official_field),
-            args.official_height_units,
-        )
+        official_record = official_height_record(city_slug, building, args)
         records[building_id] = {
             "building_footprint_id": building_id,
             "city_slug": city_slug,
+            "footprint_source": args.footprint_source,
+            "footprint_source_path": building.get("footprint_source_path"),
+            "source_polygon_count": building.get("source_polygon_count"),
+            "merge_method": building.get("merge_method"),
+            "merge_review_flag": building.get("review_flag"),
             "footprint_area_m2": building["footprint_area_m2"],
             "diagnostic_sample": bool(building["diagnostic_sample"]),
             "roof_erosion_m": building["roof_erosion_m"],
-            "official_height_source": official_field,
-            "official_height_raw": building.get(official_field),
-            "official_height_units": args.official_height_units,
-            "official_height_units_confirmed": bool(args.official_units_confirmed),
-            "official_height_m": official_height_m,
-            "official_ground_source": CITY_CONFIG[city_slug]["official_ground_field"],
-            "official_ground_raw": building.get(CITY_CONFIG[city_slug]["official_ground_field"]),
+            **official_record,
             "source_date_raw": building.get(CITY_CONFIG[city_slug]["date_field"]),
             "lidar_collect_start": CITY_CONFIG[city_slug]["lidar_collect_start"],
             "lidar_collect_end": CITY_CONFIG[city_slug]["lidar_collect_end"],
-            "temporal_mismatch_flag": temporal_mismatch_reason(city_slug, building),
+            "temporal_mismatch_flag": temporal_mismatch_reason(city_slug, building, args.footprint_source),
             "tiles_used": set(),
             "roof_z": [],
             "ground_z": [],
@@ -723,6 +804,12 @@ def process_city(
         ground_elevation_m = float(np.median(ground_z)) if len(ground_z) else math.nan
         heights = {}
         if len(roof_z) and len(ground_z):
+            heights["height_mean_m"] = enforce_minimum_nonzero_height(
+                float(np.mean(roof_z) - ground_elevation_m)
+            )
+            heights["height_median_m"] = enforce_minimum_nonzero_height(
+                float(np.median(roof_z) - ground_elevation_m)
+            )
             for percentile in [50, 75, 90, 95]:
                 heights[f"height_p{percentile}_m"] = enforce_minimum_nonzero_height(
                     float(np.percentile(roof_z, percentile) - ground_elevation_m)
@@ -736,6 +823,8 @@ def process_city(
             heights["height_m"] = heights["height_p90_m"]
             heights["height_label_m"] = heights["height_p90_m"]
         else:
+            heights["height_mean_m"] = math.nan
+            heights["height_median_m"] = math.nan
             for percentile in [50, 75, 90, 95]:
                 heights[f"height_p{percentile}_m"] = math.nan
             heights["height_max_clean_m"] = math.nan
@@ -824,8 +913,17 @@ def process_city(
     )
     output_dir = project_path("data_source", "data", "height_labels", "generated", city_slug)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_stem = "building_height_labels_all" if args.all_buildings else "building_height_diagnostics_sample"
-    temp_dir = output_dir / ("temp_all_buildings" if args.all_buildings else "temp_samples")
+    if args.footprint_source == MERGED_FOOTPRINT_SOURCE:
+        output_stem = (
+            "building_height_labels_merged_all"
+            if args.all_buildings
+            else "building_height_diagnostics_merged_sample"
+        )
+        temp_dir_name = "temp_merged_all_buildings" if args.all_buildings else "temp_merged_samples"
+    else:
+        output_stem = "building_height_labels_all" if args.all_buildings else "building_height_diagnostics_sample"
+        temp_dir_name = "temp_all_buildings" if args.all_buildings else "temp_samples"
+    temp_dir = output_dir / temp_dir_name
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     run_paths = []
@@ -845,7 +943,7 @@ def process_city(
         relative_project_path(diagnostics_path),
     )
 
-    suffix = "_all" if args.all_buildings else ""
+    suffix = output_suffix(args)
     write_comparison(deps, output, output_dir, suffix=suffix)
     write_quality_summary(output, output_dir, suffix=suffix)
     write_geopackage(deps, selected, output, output_dir, suffix=suffix)
@@ -858,6 +956,8 @@ def write_comparison(deps: dict[str, Any], output: Any, output_dir: Path, suffix
     rows = []
     valid_official = output["official_height_m"].notna()
     for column in [
+        "height_mean_m",
+        "height_median_m",
         "height_p50_m",
         "height_p75_m",
         "height_p90_m",

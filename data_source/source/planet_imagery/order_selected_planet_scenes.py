@@ -99,6 +99,9 @@ MANIFEST_COLUMNS = [
     "output_dir",
     "aoi_path",
     "order_request_json",
+    "download_status",
+    "downloaded_files",
+    "download_checked_on",
 ]
 
 
@@ -406,6 +409,9 @@ async def async_main() -> None:
                 "output_dir": project_relative_path(scene_dir),
                 "aoi_path": project_relative_path(aoi_path),
                 "order_request_json": json.dumps(request, sort_keys=True),
+                "download_status": "",
+                "downloaded_files": "",
+                "download_checked_on": "",
             }
             manifest = pd.concat([manifest, pd.DataFrame([new_row])], ignore_index=True)
             write_manifest(args.manifest, manifest[MANIFEST_COLUMNS])

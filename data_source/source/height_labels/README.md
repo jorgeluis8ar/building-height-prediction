@@ -38,6 +38,19 @@ python3 data_source/source/height_labels/derive_lidar_building_heights.py \
   --all-buildings
 ```
 
+To process the contiguous merged NYC/LA footprint layers:
+
+```bash
+python3 data_source/source/height_labels/derive_lidar_building_heights.py \
+  --city los_angeles \
+  --city new_york_city \
+  --all-buildings \
+  --footprint-source merged \
+  --official-height-units meters \
+  --official-units-confirmed \
+  --skip-sha256
+```
+
 The script writes:
 
 ```text
@@ -60,6 +73,20 @@ The output also retains `height_p50_m`, `height_p75_m`, `height_p95_m`, and
 height fields. Official NYC `HEIGHT_ROO` and LA `HEIGHT` are used only for
 diagnostics and validation. They are not used to create the LiDAR-derived
 height estimates.
+
+The merged-footprint run additionally writes separate files so original
+footprint labels are not overwritten:
+
+```text
+data_source/data/height_labels/generated/<city_slug>/building_height_labels_merged_all.csv
+data_source/data/height_labels/generated/<city_slug>/height_definition_comparison_merged_all.csv
+data_source/data/height_labels/generated/<city_slug>/quality_tier_summary_merged_all.csv
+data_source/data/height_labels/generated/<city_slug>/lidar_building_heights_merged_all.gpkg
+```
+
+These outputs include `height_mean_m` and `height_median_m` in addition to the
+percentile and max height metrics. For merged footprints, official comparison
+heights are read from the merged layer's meter-based official height summaries.
 
 The script assumes official height fields are in feet unless another unit is
 passed with `--official-height-units`. The output records
@@ -131,6 +158,8 @@ The script follows these steps:
     elevation percentiles:
 
     ```text
+    height_mean_m = mean roof elevation - local ground elevation
+    height_median_m = median roof elevation - local ground elevation
     height_p50_m = roof p50 elevation - local ground elevation
     height_p75_m = roof p75 elevation - local ground elevation
     height_p90_m = roof p90 elevation - local ground elevation
@@ -514,3 +543,218 @@ to the manifest.
     and `lidar_building_heights_all.gpkg`.
   - Output log:
     `data_source/data/height_labels/generated/derive_lidar_building_heights_20260625T182050Z.log`.
+
+## Planet-Aligned LiDAR Height Rasters
+
+`rasterize_lidar_heights_to_planet_grid.py` converts the merged building-level
+LiDAR GeoPackages into GeoTIFF rasters that match the downloaded PlanetScope
+scene grids exactly. It uses each Planet TIFF as the template grid, so the
+output copies the Planet CRS, affine transform, pixel size, width, height, and
+bounds.
+
+Run it with:
+
+```bash
+python3 data_source/source/height_labels/rasterize_lidar_heights_to_planet_grid.py \
+  --overwrite
+```
+
+By default, the script processes all downloaded Los Angeles and New York City
+PlanetScope clipped analytic surface-reflectance scenes found under:
+
+```text
+data_source/data/planet_imagery/source/<city_slug>/
+```
+
+To process one scene, pass a scene ID:
+
+```bash
+python3 data_source/source/height_labels/rasterize_lidar_heights_to_planet_grid.py \
+  --city new_york_city \
+  --scene-id 20200122_154449_92_1061 \
+  --overwrite
+```
+
+The script writes one multiband raster per Planet scene:
+
+```text
+data_source/data/height_labels/generated/<city_slug>/planet_aligned_lidar_rasters/<scene_id>_lidar_building_heights_merged_all_planet_aligned.tif
+```
+
+It also writes a project-level summary table:
+
+```text
+data_source/data/height_labels/generated/planet_aligned_lidar_raster_summary.csv
+```
+
+Current Planet grid checks:
+
+| City | Planet CRS | Pixel size | Raster size |
+|---|---:|---:|---:|
+| Los Angeles | EPSG:32611 | 3 m x 3 m | 3340 x 3325 |
+| New York City | EPSG:32618 | 3 m x 3 m | 3342 x 3329 |
+
+Band layout:
+
+| Band | Column |
+|---:|---|
+| 1 | `height_label_m` |
+| 2 | `height_mean_m` |
+| 3 | `height_median_m` |
+| 4 | `height_p50_m` |
+| 5 | `height_p75_m` |
+| 6 | `height_p90_m` |
+| 7 | `height_p95_m` |
+| 8 | `height_max_clean_m` |
+| 9 | `height_max_m` |
+| 10 | `local_ground_m` |
+| 11 | `usable_for_training_code` |
+| 12 | `quality_tier_code` |
+
+The default rasterization rule is pixel-center inclusion
+(`all_touched=False`). This means a building height is assigned to a pixel only
+when the Planet pixel center falls inside the footprint polygon. Pass
+`--all-touched` only for a sensitivity run where every touched pixel should be
+burned.
+
+## Planet-Aligned LiDAR nDSM And HTC-DC Net Files
+
+`build_lidar_ndsm_raster.py` constructs a LiDAR-derived normalized digital
+surface model directly from LAZ point clouds on the exact grid of a downloaded
+PlanetScope scene. It also exports HTC-DC-Net-style image, building-mask, and
+AGL target files.
+
+Default NYC run:
+
+```bash
+python3 data_source/source/height_labels/build_lidar_ndsm_raster.py \
+  --city new_york_city \
+  --lidar-project NY_New_York_CMGP_SANDY_LiDAR_15 \
+  --template-scene-id 20200122_154449_92_1061 \
+  --overwrite
+```
+
+New Jersey LiDAR variant:
+
+```bash
+python3 data_source/source/height_labels/build_lidar_ndsm_raster.py \
+  --city new_york_city \
+  --lidar-project NJ_New_Jersey_SANDY_LiDAR_15 \
+  --template-scene-id 20200122_154449_92_1061 \
+  --overwrite
+```
+
+The New Jersey Sandy LiDAR tiles are stored under the NYC LiDAR source folder
+because they intersect the NYC AOI. The script writes them to a separate
+generated output label, `new_york_city_new_jersey_lidar`, so they do not
+overwrite the true NYC LiDAR output.
+
+Los Angeles run:
+
+```bash
+python3 data_source/source/height_labels/build_lidar_ndsm_raster.py \
+  --city los_angeles \
+  --lidar-project CA_LosAngeles_B23 \
+  --template-scene-id 20231203_182937_07_2488 \
+  --overwrite
+```
+
+The diagnostic nDSM raster is written to:
+
+```text
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/<output_label>_lidar_ndsm_planet_aligned.tif
+```
+
+The summary CSV is written beside it:
+
+```text
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/<output_label>_lidar_ndsm_planet_aligned_summary.csv
+```
+
+Diagnostic raster band layout:
+
+| Band | Name | Meaning |
+|---:|---|---|
+| 1 | `dsm_m` | Maximum non-ground, non-excluded LiDAR elevation per Planet pixel |
+| 2 | `dtm_ground_observed_m` | Mean class-2 ground elevation where observed in that pixel |
+| 3 | `dtm_ground_filled_m` | Ground surface after filling gaps from observed ground cells |
+| 4 | `ndsm_m` | `max(dsm_m - dtm_ground_filled_m, 0)` |
+| 5 | `building_mask` | Rasterized merged city building footprints |
+| 6 | `ndsm_buildings_only_m` | nDSM retained only where `building_mask == 1` |
+
+HTC full-scene files are written under:
+
+```text
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/htc_dc_net/<scene_id>/full_scene/
+```
+
+They follow the HTC-DC-Net naming convention:
+
+| File suffix | Meaning |
+|---|---|
+| `_IMG.tif` | 3-band Planet RGB image |
+| `_BLG.tif` | Binary building mask |
+| `_AGL.tif` | Above-ground-level nDSM target, using `ndsm_buildings_only_m` |
+
+HTC chip files are written under:
+
+```text
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/htc_dc_net/<scene_id>/image/
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/htc_dc_net/<scene_id>/mask/
+data_source/data/height_labels/generated/<output_label>/lidar_ndsm/htc_dc_net/<scene_id>/ndsm/
+```
+
+Each chip basename appears in all three folders:
+
+```text
+image/<chip_id>_IMG.tif
+mask/<chip_id>_BLG.tif
+ndsm/<chip_id>_AGL.tif
+```
+
+The script also writes:
+
+```text
+chips_manifest.csv
+train.txt
+val.txt
+test.txt
+all.txt
+stats/image_stats.pickle
+```
+
+Important implementation choices:
+
+- The script filters
+  `data_source/data/height_labels/generated/usgs_3dep_tile_manifest.csv` to
+  the requested `city_slug` and `project_directory`.
+- LAZ points are projected to the Planet CRS and accumulated directly onto the
+  Planet 3 m grid; there is no separate intermediate raster grid.
+- Class 2 points define the observed DTM. Classes 7, 9, 17, 18 and withheld
+  points are excluded. Remaining non-ground points define the DSM.
+- Missing DTM cells are filled with `rasterio.fill.fillnodata` using a default
+  search distance of 250 pixels, equal to 750 m on the 3 m Planet grid.
+- The HTC `_AGL.tif` target uses the building-only nDSM, equivalent to band 6
+  of the diagnostic raster.
+- The HTC `_BLG.tif` mask uses merged building footprints.
+- The HTC `_IMG.tif` image is exported as 3-band RGB. For 4-band PlanetScope
+  scenes, RGB source bands are 3,2,1. For 8-band PlanetScope scenes, RGB
+  source bands are 6,4,2.
+- Chips default to 256 x 256 pixels with 256-pixel stride and are kept only
+  when they contain at least 25 positive AGL pixels and at least one building
+  mask pixel.
+- Train/validation/test splits are deterministic with seed `20260702`.
+
+Current HTC-ready outputs:
+
+| Output label | LiDAR project | Scene ID | RGB bands | Chips | Train | Val | Test |
+|---|---|---|---:|---:|---:|---:|---:|
+| `new_york_city` | `NY_New_York_CMGP_SANDY_LiDAR_15` | `20200122_154449_92_1061` | 3,2,1 | 103 | 72 | 15 | 16 |
+| `new_york_city_new_jersey_lidar` | `NJ_New_Jersey_SANDY_LiDAR_15` | `20200122_154449_92_1061` | 3,2,1 | 17 | 11 | 3 | 3 |
+| `los_angeles` | `CA_LosAngeles_B23` | `20231203_182937_07_2488` | 6,4,2 | 142 | 99 | 21 | 22 |
+
+These files are closer to the HTC-DC-Net data interface than the building-level
+height rasters above because they represent continuous LiDAR surfaces and use
+the expected `_IMG.tif`, `_BLG.tif`, and `_AGL.tif` file naming. They are still
+not a drop-in guarantee for training without checking the exact local HTC
+configuration, but they provide the required raster ingredients and split files.

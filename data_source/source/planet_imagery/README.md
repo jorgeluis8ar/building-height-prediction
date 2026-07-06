@@ -12,10 +12,26 @@ Search metadata only:
 python3 data_source/source/planet_imagery/search_planet_city_scenes.py
 ```
 
+Targeted 2010-2015 metadata backfill:
+
+```bash
+python3 data_source/source/planet_imagery/search_planet_city_scenes.py \
+  --start-date 2010-01-01 \
+  --end-date 2016-01-01 \
+  --output data_source/data/planet_imagery/generated/cities_scenes_results_planet_2010_2015_backfill.csv
+python3 data_source/source/planet_imagery/merge_planet_scene_backfill.py
+```
+
 Select two reviewed scenes per city:
 
 ```bash
 python3 data_source/source/planet_imagery/select_planet_city_scenes.py
+```
+
+Select NYC/LA scenes aligned to the USGS LiDAR capture windows:
+
+```bash
+python3 data_source/source/planet_imagery/select_lidar_aligned_planet_scenes.py
 ```
 
 Create Planet orders after review:
@@ -99,6 +115,46 @@ selected_asset_type_reason
 selected scenes have `ortho_analytic_8b_sr`, both rows use it. If either scene
 lacks it, both rows use the best shared fallback asset type. At this stage,
 Oslo is the only reviewed city pair using `ortho_analytic_4b_sr`.
+
+## LiDAR-Aligned NYC/LA Scene Output
+
+The LiDAR-aligned selector writes:
+
+```text
+data_source/data/planet_imagery/generated/lidar_capture_summary_for_planet_selection.csv
+data_source/data/planet_imagery/generated/selected_lidar_aligned_planet_scenes.csv
+```
+
+This output is separate from `selected_planet_city_scenes.csv`. It is centered
+on the USGS 3DEP LiDAR collection windows rather than building-footprint source
+dates, and currently contains only Los Angeles and New York City.
+
+Current LiDAR capture windows:
+
+| City | LiDAR collect start | LiDAR collect end | Midpoint |
+|---|---:|---:|---:|
+| Los Angeles | 2023-01-08 | 2024-01-07 | 2023-07-09 |
+| New York City | 2013-08-06 | 2014-04-21 | 2013-12-13 |
+
+Current LiDAR-aligned Planet selections:
+
+| City | Season | Scene ID | Scene date | Relation to LiDAR |
+|---|---|---|---:|---|
+| Los Angeles | winter_jan_dec | `20231203_182937_07_2488` | 2023-12-03 | inside LiDAR window |
+| Los Angeles | summer_jun_jul | `20230705_174134_45_245c` | 2023-07-05 | inside LiDAR window |
+| New York City | winter_jan_dec | `20200122_154449_92_1061` | 2020-01-22 | after LiDAR window |
+| New York City | summer_jun_jul | `20200614_155201_71_105e` | 2020-06-14 | after LiDAR window |
+
+The NYC selections are not contemporaneous with the LiDAR capture because the
+local Planet scene inventory begins after the 2013-2014 USGS Sandy LiDAR
+collection. They are the nearest strict zero-cloud, full-AOI, standard-quality
+winter/summer scenes available in the current Planet scene list.
+
+A targeted 2010-2015 PSScene metadata backfill was run on 2026-07-01 using the
+same cloud and AOI-coverage filters as the main scene search. It found six
+qualifying rows across the full 29-city sample, all already present in the main
+scene table, and no New York City rows. Therefore the NYC LiDAR-aligned
+selection remains the 2020 winter/summer pair above.
 
 ## Order Manifest
 

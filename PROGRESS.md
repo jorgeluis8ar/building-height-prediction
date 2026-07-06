@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-06-24
+Last updated: 2026-07-02
 
 ## Overall Plan
 
@@ -203,6 +203,124 @@ Last updated: 2026-06-24
   `building_height_labels_all.csv`, `height_definition_comparison_all.csv`,
   `quality_tier_summary_all.csv`, and `lidar_building_heights_all.gpkg` under
   each city folder in `data_source/data/height_labels/generated/`.
+- Added `data_source/source/building_footprints/merge_contiguous_footprints.py`
+  to diagnose and create candidate merged footprint layers for buildings split
+  across multiple adjacent polygons. Ran the NYC/LA diagnostic with
+  shared-boundary merging and a 0.5 m official-height similarity gate. Los
+  Angeles changed from 79,645 original polygons to 74,795 merged polygons; New
+  York City changed from 46,744 to 32,578. The script writes merged layers,
+  original-to-merged crosswalks, component diagnostics, and review-sample
+  GeoPackages under each city's building-footprint generated folder.
+- Updated the merged footprint outputs to carry official source height and
+  ground/elevation summaries in meters, including mean, median, min, max, and
+  area-weighted values. NYC `HEIGHT_ROO`/`GROUND_ELE` and LA `HEIGHT`/`ELEV`
+  are converted from feet to meters before aggregation.
+- Updated `data_source/source/building_footprints/clip_building_footprints.py`
+  so 5km building-footprint generation selects any source polygon intersecting
+  the 5km AOI and preserves the full original polygon geometry instead of
+  clipping geometry to the AOI boundary. Reran the script for all 29 current
+  cities. The generated city GeoPackages keep the existing
+  `<city_slug>_building_footprints_5km.gpkg` names for downstream
+  compatibility and include
+  `aoi_selection_rule = intersects_5km_aoi_preserve_full_geometry`.
+- Reran `data_source/source/building_footprints/merge_contiguous_footprints.py`
+  for Los Angeles and New York City using the regenerated whole-geometry 5km
+  footprint files. Los Angeles now changes from 79,645 original polygons to
+  74,795 merged polygons across 3,610 merged components; New York City remains
+  46,744 to 32,578 across 6,821 merged components.
+- Added `data_source/source/planet_imagery/select_lidar_aligned_planet_scenes.py`
+  to select NYC/LA Planet scenes around the USGS LiDAR capture windows. The
+  LiDAR windows are 2023-01-08 to 2024-01-07 for Los Angeles and 2013-08-06 to
+  2014-04-21 for New York City. The selected LA scenes are inside the LiDAR
+  window; the selected NYC scenes are the nearest strict clean post-LiDAR
+  winter/summer scenes in the current Planet scene list because the inventory
+  begins after the 2013-2014 LiDAR capture. Outputs are
+  `lidar_capture_summary_for_planet_selection.csv` and
+  `selected_lidar_aligned_planet_scenes.csv`.
+- Ran a targeted Planet PSScene metadata backfill for 2010-01-01 through
+  2016-01-01 across all 29 current cities using
+  `search_planet_city_scenes.py`. The query wrote
+  `cities_scenes_results_planet_2010_2015_backfill.csv` with six qualifying
+  rows, none for New York City. Added and ran
+  `merge_planet_scene_backfill.py`; all six backfill rows were already present
+  in `cities_scenes_results_planet.csv`, so the main table remains 17,033
+  rows. Reran the LiDAR-aligned selector; NYC remains the 2020 winter/summer
+  pair because no closer 2010-2015 NYC PSScene rows satisfy the current search
+  constraints.
+- Created Planet orders for the four LiDAR-aligned NYC/LA scenes using
+  `selected_lidar_aligned_planet_scenes.csv`; no downloads were run. New York
+  City orders use `ortho_analytic_4b_sr` / `analytic_sr_udm2` because the 2020
+  scenes do not expose the selected 8-band SR asset, while Los Angeles orders
+  use `ortho_analytic_8b_sr` / `analytic_8b_sr_udm2`. The order IDs are:
+  NYC winter `1da57091-4c6e-4b3b-bde1-2be6aace54bc`, NYC summer
+  `bfd6d704-820c-4457-a089-f835d36f8383`, LA winter
+  `e7156ff1-873e-4a9c-9537-0507b6c97e07`, and LA summer
+  `c074f656-c35f-40f1-86e0-5c1c87bd3de3`. Updated
+  `order_selected_planet_scenes.py` so future order runs preserve the
+  manifest's download bookkeeping columns.
+- Updated `download_ordered_planet_scenes.py` with a repeatable `--scene-id`
+  filter and used it to download only the four LiDAR-aligned NYC/LA Planet
+  orders. Existing older NYC/LA scene folders were preserved. Each new order
+  downloaded five files and is marked `downloaded` in
+  `planet_orders_manifest.csv`.
+- Updated `derive_lidar_building_heights.py` to support
+  `--footprint-source merged` and to write `height_mean_m` and
+  `height_median_m` alongside the existing percentile and max LiDAR height
+  metrics. Reran the full all-building LiDAR pipeline on the refreshed merged
+  Los Angeles and New York City footprint layers. Los Angeles produced 74,795
+  merged footprint rows, with 68,793 training-usable labels; New York City
+  produced 32,578 merged footprint rows, with 31,356 training-usable labels.
+  Outputs are stored as `building_height_labels_merged_all.csv`,
+  `height_definition_comparison_merged_all.csv`,
+  `quality_tier_summary_merged_all.csv`, and
+  `lidar_building_heights_merged_all.gpkg` under each city folder in
+  `data_source/data/height_labels/generated/`.
+- Added `data_source/source/height_labels/rasterize_lidar_heights_to_planet_grid.py`
+  to rasterize the merged LiDAR height GeoPackages onto the exact downloaded
+  PlanetScope grids. The script uses each Planet TIFF as the template, copies
+  its CRS, affine transform, 3 m pixel size, width, height, and bounds, and
+  writes multiband height rasters under
+  `data_source/data/height_labels/generated/<city_slug>/planet_aligned_lidar_rasters/`.
+  Ran the workflow for all downloaded Los Angeles and New York City Planet
+  scenes: four LA rasters in `EPSG:32611` at 3340 x 3325 pixels and four NYC
+  rasters in `EPSG:32618` at 3342 x 3329 pixels. Independent audit confirmed
+  CRS, transform, dimensions, bounds, and resolution exactly match the Planet
+  templates. The run also wrote
+  `data_source/data/height_labels/generated/planet_aligned_lidar_raster_summary.csv`.
+- Created the `ml_models` task folders under `data_source/source/` and
+  `data_source/data/`. Added `data_source/source/ml_models/README.md` as the
+  running ML decision log. The first logged plan predicts `height_mean_m` from
+  winter and summer PlanetScope features, starts with building-level zonal
+  features, compares a mean baseline, ridge, random forest, and XGBoost, and
+  documents why naive pixel-level training can overstate accuracy.
+- Reviewed `zhu-xlab/GlobalBuildingAtlas` and its `HTC-DC-Net` height-model
+  submodule. Added
+  `data_source/source/ml_models/GLOBAL_BUILDING_ATLAS_HEIGHT_MODEL.md`, which
+  summarizes their PlanetScope height-prediction workflow: PyTorch HTC-DC Net,
+  raster-chip training with image/mask/nDSM TIFF triplets, sliding-window
+  Planet inference, raster and building-aware validation metrics, and lessons
+  for adapting the workflow to NYC/LA.
+- Added `data_source/source/ml_models/HTC_DC_NET_APPLICATION_README.md` after
+  deeper inspection of the GlobalBuildingAtlas and HTC-DC-Net code. The note
+  records that the public repos do not include raw LiDAR point-cloud-to-nDSM
+  generation code, identifies the active polygonization/simplification path
+  (`PolygonizerV10`, `PolyRegularizerV5`, and the custom dynamic-programming
+  `simplify_poly_jsons` ring simplifier), and lists the GBA-style image/mask
+  /height chip dataset we need before HTC-DC Net can run on NYC/LA.
+- Added `data_source/source/height_labels/build_lidar_ndsm_raster.py` and
+  generated the first NYC Planet-aligned LiDAR nDSM raster at
+  `data_source/data/height_labels/generated/new_york_city/lidar_ndsm/new_york_city_lidar_ndsm_planet_aligned.tif`.
+  The workflow uses only `NY_New_York_CMGP_SANDY_LiDAR_15`, explicitly
+  excludes `NJ_New_Jersey_SANDY_LiDAR_15`, aligns to the NYC Planet scene
+  `20200122_154449_92_1061`, and writes DSM, observed DTM, filled DTM, nDSM,
+  building mask, and building-only nDSM bands.
+- Generalized `build_lidar_ndsm_raster.py` to create HTC-DC-Net-style
+  full-scene and chip datasets. The script now writes `_IMG.tif` RGB Planet
+  rasters, `_BLG.tif` building masks, `_AGL.tif` building-only nDSM targets,
+  256 x 256 image/mask/AGL chips, `train.txt`, `val.txt`, `test.txt`,
+  `all.txt`, `chips_manifest.csv`, and `stats/image_stats.pickle`. Ran it for
+  three variants: NYC New York LiDAR (`103` chips), NYC/New Jersey Sandy LiDAR
+  variant (`17` chips), and Los Angeles (`142` chips).
 
 ## Current Status
 
@@ -224,11 +342,16 @@ Last updated: 2026-06-24
   `order_selected_planet_scenes.py --dry-run` before `--confirm-order`, then
   run `download_ordered_planet_scenes.py --dry-run` before
   `--confirm-download` after orders complete.
-- The building-footprint clipping script can be run with
+- The building-footprint AOI-selection script can be run with
   `python3 data_source/source/building_footprints/clip_building_footprints.py`;
   it will use
   `data_source/source/building_footprints/venv_building_footprints/`
-  automatically.
+  automatically. The output name still contains `_5km`, but geometries are
+  preserved whole when they intersect the 5km AOI.
+- Contiguous footprint merge diagnostics can be run with
+  `python3 data_source/source/building_footprints/merge_contiguous_footprints.py`;
+  merged layers are not canonical until their review samples have been
+  inspected.
 - The USGS LiDAR script can be run with
   `python3 data_source/source/height_labels/download_usgs_3dep_lidar.py
   --dry-run --estimate-sizes`; it automatically uses
@@ -240,6 +363,15 @@ Last updated: 2026-06-24
 - Task-specific source code currently exists for city AOIs, Planet imagery,
   building footprints, U.S. height-label acquisition, and NYC/LA LiDAR
   building-height diagnostics.
+- Planet-aligned LiDAR height rasters now exist for all downloaded LA and NYC
+  PlanetScope scenes. These rasters are ready to use as pixel-aligned label
+  layers for imagery-chip extraction and model-training data assembly.
+- LiDAR point-cloud nDSM and HTC-DC-Net-style image/mask/AGL chip datasets now
+  exist for NYC New York LiDAR, the NYC/New Jersey Sandy LiDAR variant, and Los
+  Angeles. These are ready for visual QA before attempting model training.
+- ML model decisions and future scripts should now be maintained under
+  `data_source/source/ml_models/`; generated ML tables, metrics, predictions,
+  and model artifacts should go under `data_source/data/ml_models/generated/`.
 - The next modeling plan is documented in
   `notes/NYC_LA_MODEL_TRAINING_PLAN.md`.
 
@@ -247,7 +379,9 @@ Last updated: 2026-06-24
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
-- Harmonize clipped building-footprint attributes into the common
+- Harmonize AOI-selected building-footprint attributes into the common
   building-level schema once height-label processing begins.
 - Inspect full-run rejected buildings and extreme residuals before moving to
   image-chip extraction and model training.
+- Visually inspect `*_footprint_merge_review_sample.gpkg` for NYC and LA as an
+  additional quality check on the merged-footprint layer.
