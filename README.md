@@ -25,6 +25,21 @@ The project is intended to:
 
 The longer-run objective is a worldwide, building-level height dataset.
 
+## Selected Model
+
+The current primary model is the four-channel off-nadir PlanetScope RGB+NIR
+HTC-DC Net with an EfficientNet-B0 backbone:
+
+```text
+nyc76_la95_offnadir_rgbnir_4ch_lowrise_binweighted_bg005_seed20260721_epoch50_guarded
+```
+
+Its exact parameters, checkpoint identity, validation rationale, and
+cross-computer reproduction requirements are recorded in
+`data_source/source/ml_models/SELECTED_HTC_DC_MODEL.md`. Generated datasets and
+model checkpoints are excluded from GitHub by `.gitignore` and must be
+transferred or rebuilt separately.
+
 ## Data
 
 ### Current Cities

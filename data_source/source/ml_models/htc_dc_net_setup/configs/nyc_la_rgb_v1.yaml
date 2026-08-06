@@ -1,0 +1,23 @@
+## Project data/configuration for NYC + LA RGB HTC-DC Net v1
+
+data_dir: data_source/data/ml_models/generated/htc_dc_net/nyc_la_rgb_v1
+data_split_dirs: data_source/data/ml_models/generated/htc_dc_net/nyc_la_rgb_v1
+test_data_split_dirs:
+  - data_source/data/ml_models/generated/htc_dc_net/nyc_la_rgb_v1
+
+patch_size: 4
+image_size: 256
+hflip: False
+normalize: True
+use_mask: True
+test_use_mask: True
+
+seed: 20260706
+device: cpu
+checkpoint_dir: data_source/data/ml_models/generated/htc_dc_net/runs
+
+log_interval: 1
+checkpoint_interval: 1
+patience: 5
+
+name: nyc_la_rgb_v1_smoke

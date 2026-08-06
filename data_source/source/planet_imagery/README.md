@@ -12,6 +12,21 @@ Search metadata only:
 python3 data_source/source/planet_imagery/search_planet_city_scenes.py
 ```
 
+Search NYC/LA metadata only with Planet `view_angle` included in a separate output:
+
+```bash
+python3 data_source/source/planet_imagery/search_planet_nyc_la_view_angle_scenes.py \
+  --start-date 2010-01-01 \
+  --end-date 2026-07-21
+```
+
+This writes:
+
+```text
+data_source/data/planet_imagery/generated/nyc_la_scenes_results_planet_with_view_angle.csv
+```
+
+
 Targeted 2010-2015 metadata backfill:
 
 ```bash
@@ -32,6 +47,13 @@ Select NYC/LA scenes aligned to the USGS LiDAR capture windows:
 
 ```bash
 python3 data_source/source/planet_imagery/select_lidar_aligned_planet_scenes.py
+```
+
+Select two additional NYC/LA scenes between the current LiDAR-aligned scene
+pair, prioritizing sun-elevation diversity:
+
+```bash
+python3 data_source/source/planet_imagery/select_intermediate_sun_elevation_scenes.py
 ```
 
 Create Planet orders after review:
@@ -156,6 +178,45 @@ qualifying rows across the full 29-city sample, all already present in the main
 scene table, and no New York City rows. Therefore the NYC LiDAR-aligned
 selection remains the 2020 winter/summer pair above.
 
+## Intermediate Sun-Elevation Scene Output
+
+The intermediate selector writes:
+
+```text
+data_source/data/planet_imagery/generated/selected_intermediate_planet_scenes.csv
+data_source/data/planet_imagery/generated/intermediate_sun_elevation_scene_review.csv
+```
+
+This output is for the 12-channel HTC-DC Net experiment. It starts from the two
+LiDAR-aligned scenes already used by the 6-channel model, keeps only strict
+zero-cloud, full-AOI, standard-quality candidate scenes between those two
+acquisitions, and chooses the pair that maximizes sun-elevation diversity
+across the four total scenes for each city.
+
+The selected scenes from the first run are:
+
+| City | Role | Scene ID | Scene date | Sun elevation |
+|---|---|---|---:|---:|
+| Los Angeles | new intermediate | `20230713_182102_57_241c` | 2023-07-13 | 65.7 |
+| Los Angeles | new intermediate | `20231203_171912_53_2445` | 2023-12-03 | 24.1 |
+| New York City | new intermediate | `20200124_153319_56_1063` | 2020-01-24 | 26.1 |
+| New York City | new intermediate | `20200526_155004_25_1058` | 2020-05-26 | 66.7 |
+
+The order-compatible CSV should be reviewed and dry-run before any orders are
+submitted:
+
+```bash
+python3 data_source/source/planet_imagery/order_selected_planet_scenes.py \
+  --selected-scenes data_source/data/planet_imagery/generated/selected_intermediate_planet_scenes.csv \
+  --dry-run
+```
+
+Only after explicit approval should the same command be run with
+`--confirm-order`. Planet orders may remain queued or running for some time, so
+the workflow stops after ordering and resumes later with
+`download_ordered_planet_scenes.py --dry-run` once the manifest reports
+downloadable order states.
+
 ## Order Manifest
 
 The order script writes:
@@ -208,3 +269,36 @@ The script updates the manifest with `download_status`, `downloaded_files`,
 - Use `--confirm-download` only after the portal or manifest shows orders are complete.
 - Do not rerun order creation blindly; use the manifest to avoid duplicate orders.
 - Do not manually edit downloaded Planet imagery. Treat `source/` as raw data.
+
+## Off-Nadir Candidate Ranking
+
+`rank_planet_off_nadir_candidates.py` performs a metadata-only search for
+scenes that cover a fixed city AOI even when the scene footprint is centered
+some distance away. It does not order, activate, or download imagery.
+
+For a ten-scene New York City prototype, run:
+
+```bash
+python3 data_source/source/planet_imagery/rank_planet_off_nadir_candidates.py \
+  --city new_york_city \
+  --top-n 10
+```
+
+The default filters require zero reported cloud cover, standard quality,
+effectively 100% coverage of the 5km AOI, and at least 500m between the AOI
+and the scene-footprint boundary. The ranking score gives 60% weight to
+Planet's reported `view_angle`, 25% to scene-center offset, 10% to clear
+percentage, and 5% to AOI boundary clearance. Scene-center offset is only a
+supporting geometric indicator; `view_angle` is the direct off-nadir measure.
+
+Outputs are written to:
+
+```text
+data_source/data/planet_imagery/generated/<city>_off_nadir_candidate_pool.csv
+data_source/data/planet_imagery/generated/<city>_off_nadir_top10_scenes.csv
+```
+
+The output records acquisition time, view and illumination angles, scene/AOI
+centroids, center-offset distance and direction, AOI coverage, edge clearance,
+quality fields, and the final ranking score. Review this table before creating
+any order-compatible selection file.

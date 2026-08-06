@@ -9,6 +9,50 @@ The proposed process for converting classified point clouds into defensible
 building-level roof-to-ground heights is documented in
 `LIDAR_BUILDING_HEIGHT_PROCESS.md`.
 
+## Planet-Aligned nDSM And HTC Targets
+
+`build_lidar_ndsm_raster.py` builds Planet-aligned LiDAR DSM, DTM, nDSM, and
+HTC-DC-Net-style image/mask/AGL chip datasets for New York City and Los
+Angeles.
+
+The current target rule for HTC AGL rasters is:
+
+```text
+If building_mask > 0 and finite nDSM <= 0, set AGL to 2.4 m.
+```
+
+This rule is controlled by:
+
+```text
+--min-building-agl-m 2.4
+```
+
+The rule is applied before writing the full-scene `_AGL.tif` and before
+creating 256 x 256 `_AGL.tif` chips. Background remains NoData in the
+building-only AGL target.
+
+Latest NYC/LA rebuild:
+
+```text
+NYC finite nonpositive building pixels imputed: 268
+LA finite nonpositive building pixels imputed: 1,829
+Remaining valid zero/negative AGL pixels inside building mask: 0
+```
+
+Regeneration commands:
+
+```bash
+data_source/source/height_labels/venv_height_labels/bin/python \
+  data_source/source/height_labels/build_lidar_ndsm_raster.py \
+  --city new_york_city \
+  --overwrite
+
+data_source/source/height_labels/venv_height_labels/bin/python \
+  data_source/source/height_labels/build_lidar_ndsm_raster.py \
+  --city los_angeles \
+  --overwrite
+```
+
 ## LiDAR-Derived Building Heights
 
 `derive_lidar_building_heights.py` creates building-level height diagnostics

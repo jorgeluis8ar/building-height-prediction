@@ -183,6 +183,15 @@ def parse_args() -> argparse.Namespace:
         help="Minimum positive AGL pixels required to keep a chip. Default: 25.",
     )
     parser.add_argument(
+        "--min-building-agl-m",
+        type=float,
+        default=2.4,
+        help=(
+            "Minimum AGL height, in meters, assigned to finite nonpositive nDSM "
+            "pixels inside the building mask. Default: 2.4."
+        ),
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=20260702,
@@ -479,6 +488,29 @@ def diagnostic_bands(
         ("building_mask", building_mask.astype(np.float32)),
         ("ndsm_buildings_only_m", ndsm_buildings_only),
     ]
+
+
+def enforce_minimum_building_agl(
+    ndsm: np.ndarray,
+    building_mask: np.ndarray,
+    minimum_height_m: float,
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Create building-only AGL with a minimum positive height inside buildings."""
+    building_pixels = building_mask > 0
+    finite_building_pixels = building_pixels & np.isfinite(ndsm)
+    imputed_pixels = finite_building_pixels & (ndsm <= 0)
+    ndsm_buildings_only = np.where(building_pixels, ndsm, np.nan).astype(np.float32)
+    ndsm_buildings_only[imputed_pixels] = minimum_height_m
+    audit = {
+        "building_agl_minimum_imputed_pixels": int(imputed_pixels.sum()),
+        "building_agl_remaining_zero_pixels": int(
+            ((ndsm_buildings_only == 0) & building_pixels & np.isfinite(ndsm_buildings_only)).sum()
+        ),
+        "building_agl_remaining_negative_pixels": int(
+            ((ndsm_buildings_only < 0) & building_pixels & np.isfinite(ndsm_buildings_only)).sum()
+        ),
+    }
+    return ndsm_buildings_only, audit
 
 
 def write_multiband_output(
@@ -931,7 +963,16 @@ def main() -> None:
             footprint_path=footprint_path,
             all_touched=args.all_touched_building_mask,
         )
-        ndsm_buildings_only = np.where(building_mask > 0, ndsm, np.nan).astype(np.float32)
+        ndsm_buildings_only, min_agl_audit = enforce_minimum_building_agl(
+            ndsm=ndsm,
+            building_mask=building_mask,
+            minimum_height_m=args.min_building_agl_m,
+        )
+        logging.info(
+            "Applied %.2f m minimum AGL to %s finite nonpositive building pixels.",
+            args.min_building_agl_m,
+            min_agl_audit["building_agl_minimum_imputed_pixels"],
+        )
 
         common_tags = {
             "city": city,
@@ -1023,9 +1064,11 @@ def main() -> None:
                 "chip_size": args.chip_size,
                 "chip_stride": args.chip_stride,
                 "min_positive_agl_pixels": args.min_positive_agl_pixels,
+                "min_building_agl_m": args.min_building_agl_m,
                 "seed": args.seed,
                 "log_path": relative_path(log_path),
                 **stats,
+                **min_agl_audit,
                 **htc_summary,
             }
         write_summary(summary_path, summary)

@@ -1,0 +1,18 @@
+# Minimal local smoke-test environment for Apple Silicon.
+#
+# The upstream HTC-DC-Net environment is Linux/CUDA/Python 3.8 oriented. This
+# file is for loading the dataloader/model on this Mac and running tiny CPU/MPS
+# smoke tests. Full training should later use a GPU environment.
+
+torch
+torchvision
+numpy
+scikit-image
+opencv-python
+rasterio
+PyYAML
+tqdm
+wandb
+fvcore
+matplotlib
+timm==0.9.7

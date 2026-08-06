@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 ## Overall Plan
 
@@ -321,6 +321,64 @@ Last updated: 2026-07-02
   `all.txt`, `chips_manifest.csv`, and `stats/image_stats.pickle`. Ran it for
   three variants: NYC New York LiDAR (`103` chips), NYC/New Jersey Sandy LiDAR
   variant (`17` chips), and Los Angeles (`142` chips).
+- Added `data_source/source/ml_models/combine_htc_datasets.py` and created the
+  combined HTC-DC Net RGB v1 dataset at
+  `data_source/data/ml_models/generated/htc_dc_net/nyc_la_rgb_v1/`. The
+  combined dataset includes only true NYC and LA chips, excludes the
+  NYC/New Jersey Sandy LiDAR diagnostic variant, and writes unified `image/`,
+  `mask/`, `ndsm/`, split files, `chips_manifest.csv`, `image_stats.pickle`,
+  and `ndsm_stats.pickle`. Current counts are 245 chips total: 171 train, 37
+  validation, and 37 test.
+- Vendored the HTC-DC Net code at
+  `data_source/source/ml_models/external/HTC-DC-Net/` from commit
+  `adae55edc8be589757cec57f839d59a681d93364` and added project-specific setup
+  files under `data_source/source/ml_models/htc_dc_net_setup/`. Created the
+  local Apple Silicon smoke-test environment
+  `data_source/source/ml_models/venv_htc_dc_net/`, wrote HTC-compatible
+  root-level dataset statistics, and verified the released `efficientnetb0`
+  HTC-DC Net config on the combined NYC+LA dataset. The verification loads the
+  dataloader, builds `UBins` with `AdamW`, runs `model(image, gt)`, computes
+  losses and predictions, and completes one backward/optimizer step.
+- Added `data_source/source/ml_models/run_htc_mini_training.py` and ran the
+  first mini HTC-DC Net training/estimation job using 5 New York City and 5
+  Los Angeles training chips, one epoch, and seed `20260707`. The run trained
+  the real `UBins`/`efficientnetb0` model, saved `model_last.pth`, exported 10
+  predicted nDSM rasters, and wrote `training_history.csv` and
+  `predictions_summary.csv` under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc5_la5_seed20260707_epoch1/`.
+- Updated the HTC mini-training prediction exporter to write georeferenced
+  GeoTIFF predictions by copying each chip's `_AGL.tif` CRS, transform, width,
+  height, and resolution. Regenerated the first mini-run predictions and
+  verified that all 10 predictions match their target chip geometry: five Los
+  Angeles predictions in `EPSG:32611` and five New York City predictions in
+  `EPSG:32618`.
+- Updated `build_lidar_ndsm_raster.py` so finite nonpositive nDSM pixels inside
+  the building mask are assigned a minimum AGL target of `2.4` meters before
+  writing full-scene HTC `_AGL.tif` files and chips. Reran the full nDSM/HTC
+  chip build for New York City and Los Angeles, rebuilt the combined
+  `nyc_la_rgb_v1` HTC dataset, refreshed HTC-compatible root stats, and reran
+  the 5 NYC + 5 LA mini model with the same seed and one-epoch parameters. The
+  rebuild imputed 268 NYC pixels and 1,829 LA pixels; validation found zero
+  valid `AGL <= 0` pixels inside the building mask in the full-scene, combined
+  chip, and mini-run targets.
+- Extended `run_htc_mini_training.py` to save periodic prediction rasters,
+  periodic checkpoints, epoch-level training-loss summaries, and
+  `training_loss.png`. Ran the same 5 NYC + 5 LA mini experiment for 50 epochs
+  with `lr = 0.001`, seed `20260707`, and prediction/checkpoint exports every
+  10 epochs. Outputs are under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc5_la5_seed20260707_epoch50_lr001/`.
+  Mean training loss fell from 57.0792 at epoch 1 to 33.3211 at epoch 50, with
+  the best mean loss 33.2129 at epoch 42. Final mini-run mean MAE was 9.5385 m
+  for Los Angeles and 27.8521 m for New York City.
+- Ran a larger 40-chip HTC-DC Net mini experiment using 20 random New York City
+  and 20 random Los Angeles training chips, seed `20260707`, 50 epochs,
+  `lr = 0.001`, and prediction/checkpoint exports every 10 epochs. Outputs are
+  under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc20_la20_seed20260707_epoch50_lr001/`.
+  Mean training loss fell from 31.5639 at epoch 1 to 24.3134 at epoch 50,
+  which was the best epoch. Final mean MAE was 4.5515 m for Los Angeles and
+  22.9391 m for New York City. The run exported 40 final georeferenced
+  prediction rasters: 20 in `EPSG:32611` and 20 in `EPSG:32618`.
 
 ## Current Status
 
@@ -369,11 +427,235 @@ Last updated: 2026-07-02
 - LiDAR point-cloud nDSM and HTC-DC-Net-style image/mask/AGL chip datasets now
   exist for NYC New York LiDAR, the NYC/New Jersey Sandy LiDAR variant, and Los
   Angeles. These are ready for visual QA before attempting model training.
+- The combined NYC+LA HTC-DC Net RGB v1 dataset exists under
+  `data_source/data/ml_models/generated/htc_dc_net/nyc_la_rgb_v1/` and is
+  ready for HTC training experiments. The HTC dataloader/environment/model
+  smoke test has passed with the released `efficientnetb0` config.
+- HTC-DC Net setup instructions, configs, and verification notes are in
+  `data_source/source/ml_models/htc_dc_net_setup/`.
+- The first HTC-DC Net mini-run estimates are saved locally under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc5_la5_seed20260707_epoch1/`.
+  They have been regenerated against the updated 2.4 m minimum AGL target
+  definition.
+- The 50-epoch HTC-DC Net mini-run estimates, periodic checkpoints, periodic
+  predictions, and loss plot are saved locally under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc5_la5_seed20260707_epoch50_lr001/`.
+- The 40-chip, 50-epoch HTC-DC Net mini-run estimates, periodic checkpoints,
+  periodic predictions, and loss plot are saved locally under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc20_la20_seed20260707_epoch50_lr001/`.
+- Diagnostics showed that the two 50-epoch mini-runs collapsed to constant
+  prediction rasters even though the 1-epoch smoke run produced spatially
+  varying predictions. The mini-training runner now writes per-chip prediction
+  range/std/unique-value diagnostics and can stop early when saved predictions
+  collapse.
 - ML model decisions and future scripts should now be maintained under
   `data_source/source/ml_models/`; generated ML tables, metrics, predictions,
   and model artifacts should go under `data_source/data/ml_models/generated/`.
 - The next modeling plan is documented in
   `notes/NYC_LA_MODEL_TRAINING_PLAN.md`.
+- Added
+  `data_source/source/planet_imagery/select_intermediate_sun_elevation_scenes.py`
+  for the 12-channel HTC-DC Net experiment. The selector chooses two strict
+  zero-cloud, full-AOI, standard-quality intermediate PlanetScope scenes per
+  city to maximize sun-elevation diversity across the four-scene set. It wrote
+  `selected_intermediate_planet_scenes.csv` and
+  `intermediate_sun_elevation_scene_review.csv`. The selected new scenes are
+  LA `20230713_182102_57_241c`, LA `20231203_171912_53_2445`, NYC
+  `20200124_153319_56_1063`, and NYC `20200526_155004_25_1058`.
+- Ran the Planet order dry-run for the four intermediate scenes. The dry-run
+  passed without creating orders: LA scenes use `ortho_analytic_8b_sr`
+  (`analytic_8b_sr_udm2`) and NYC scenes use `ortho_analytic_4b_sr`
+  (`analytic_sr_udm2`). After explicit approval, submitted the four live
+  Planet orders. After the orders reached `success`, ran the required download
+  dry-run and then downloaded all four scenes. The order IDs, source folders,
+  and raster-open verification notes are recorded in
+  `data_source/data/planet_imagery/generated/intermediate_planet_order_status.md`.
+- Added `data_source/source/ml_models/build_htc_dataset_multiscene.py` to
+  build a future `nyc_la_12ch_v1` HTC-DC Net dataset after the new Planet
+  orders are downloaded. The script stacks four RGB scenes per city, writes
+  the usual `image/`, `mask/`, `ndsm/`, split files, manifest, normalization
+  stats, and a `scene_channel_plan.csv`.
+- Updated `run_htc_mini_training.py` so `--in-channels` is validated against
+  the dataset image band count and `image_stats.pickle` lengths before
+  training. Existing `nyc_la_rgb_v1` and `nyc_la_6ch_v1` datasets both passed
+  channel validation.
+- Built the 12-channel NYC+LA HTC-DC Net dataset at
+  `data_source/data/ml_models/generated/htc_dc_net/nyc_la_12ch_v1/` using four
+  PlanetScope RGB scenes per city. The dataset reuses the `nyc_la_6ch_v1`
+  train/validation/test split for comparability, producing 171 training chips
+  with 76 NYC and 95 LA chips. Alignment verification passed for all 245 chips:
+  all image chips have 12 bands, image/mask/AGL rasters share CRS, transform,
+  resolution, width, and height, LA chips are in `EPSG:32611`, and NYC chips
+  are in `EPSG:32618`.
+- Ran the 12-channel HTC-DC Net model with the same settings as the previous
+  low-rise bin-weighted 6-channel run, changing only the dataset and
+  `--in-channels 12`. The run is saved under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc76_la95_12ch_lowrise_binweighted_bg005_seed20260715_epoch20_guarded/`.
+  Final training-chip diagnostics: LA mean MAE 4.17 m, NYC mean MAE 12.05 m,
+  overall mean MAE 7.67 m, and 2 collapsed chips out of 171.
+- Ran the comparable 50-epoch 12-channel HTC-DC Net model under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc76_la95_12ch_lowrise_binweighted_bg005_seed20260715_epoch50_guarded/`.
+  Final training-chip diagnostics improved to LA mean MAE 3.38 m, NYC mean
+  MAE 8.83 m, overall mean MAE 5.80 m, and 0 collapsed chips out of 171.
+  Building-level scatter diagnostics are saved in the run `evaluation/`
+  folder; the overall building-level fit is `y = -0.100 + 0.908x`,
+  RMSE 5.69 m, and R2 0.808.
+- Added HTC-DC Net cross-validation tooling for the `nyc_la_12ch_v1` dataset.
+  `build_htc_cv_folds.py` creates three fold-specific HTC dataset folders
+  from the original train+validation pool while leaving the 37-chip test split
+  untouched. `run_htc_cross_validation.py` runs the staged parameter grid and
+  ranks configurations by mean validation-chip RMSE. A one-config, one-fold,
+  one-epoch smoke test completed successfully and wrote outputs under
+  `data_source/data/ml_models/generated/htc_dc_net/cross_validation/nyc_la_12ch_v1/`.
+- Added `data_source/source/planet_imagery/search_planet_nyc_la_view_angle_scenes.py`
+  for a metadata-only Planet Data API query of Los Angeles and New York City
+  scenes that includes `view_angle`, `satellite_azimuth`, and `sun_azimuth`.
+  Ran it for 2010-01-01 through 2026-07-21. The separate output
+  `data_source/data/planet_imagery/generated/nyc_la_scenes_results_planet_with_view_angle.csv`
+  contains 1,586 rows: 904 Los Angeles scenes and 682 New York City scenes,
+  with non-missing `view_angle` for every row. No Planet orders or downloads
+  were created.
+- Created `data_source/data/planet_imagery/generated/selected_off_nadir_planet_scenes.csv`
+  for two user-selected high-view-angle PlanetScope scenes: LA
+  `20251002_190325_64_24d1` and NYC `20241113_160040_50_24e0`. Ran the
+  required dry-run successfully, then submitted AOI-clipped Planet orders only
+  after user approval. Both orders use `ortho_analytic_8b_sr`
+  (`analytic_8b_sr_udm2`) and were queued in `planet_orders_manifest.csv`: LA
+  order `ac6d971f-bcd6-4b2d-88aa-5634655acd03`, NYC order
+  `d59c99c4-18a7-4008-bbb1-0e39e491bf3f`. No downloads were run.
+- Scaffolding is ready for the next planned off-nadir 3-channel HTC-DC Net
+  experiment. Created the pending dataset folder
+  `data_source/data/ml_models/generated/htc_dc_net/nyc_la_off_nadir_rgb_v1/`
+  with `image/`, `mask/`, `ndsm/`, `stats/`, copied split files, and wrote
+  `off_nadir_scene_plan.csv`, `dataset_setup_status.json`, and `README.md`.
+  Created the planned run folder
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc76_la95_offnadir_3ch_lowrise_binweighted_bg005_seed20260720_epoch50_guarded/`
+  with `planned_config.yaml` and `README.md`. Also added
+  `data_source/source/ml_models/HTC_MODEL_RUN_SUMMARY_README.md`, which
+  summarized completed HTC model runs and, at that stage, highlighted the
+  50-epoch 12-channel low-rise/high-rise bin-weighted model. That historical
+  designation was later superseded by the selected off-nadir RGB+NIR B0 model.
+- Downloaded the two queued off-nadir PlanetScope orders after the required
+  dry-run confirmed both were in `success` state. LA scene
+  `20251002_190325_64_24d1` and NYC scene `20241113_160040_50_24e0` each
+  downloaded five files, including the clipped 8-band SR TIFF, UDM2, metadata
+  JSON, XML, and manifest. Raster-open verification passed: LA is
+  `EPSG:32611`, 3340 by 3325 pixels, 8 bands, 3 m resolution; NYC is
+  `EPSG:32618`, 3342 by 3329 pixels, 8 bands, 3 m resolution. The off-nadir
+  HTC dataset status is now pending LiDAR nDSM/mask/RGB chip creation.
+- Built and validated the off-nadir 3-channel HTC dataset at
+  `data_source/data/ml_models/generated/htc_dc_net/nyc_la_off_nadir_rgb_v1/`.
+  The city-specific off-nadir LiDAR nDSM/HTC builds completed for LA scene
+  `20251002_190325_64_24d1` and NYC scene `20241113_160040_50_24e0`, using
+  each Planet scene as the target grid. One NYC edge chip with non-empty
+  mask/AGL but an all-zero RGB image was excluded. The final model-ready
+  dataset has 244 chips: 142 LA and 102 NYC; train/validation/test are
+  171/36/37, with the training split preserving 95 LA and 76 NYC chips. Final
+  validation passed: every chip has non-empty image, mask, and AGL data, and
+  every chip and full-scene `_IMG`, `_BLG`, and `_AGL` triplet shares CRS,
+  transform, dimensions, and 3 m resolution.
+- Trained the proposed off-nadir 3-channel HTC-DC Net model
+  `nyc76_la95_offnadir_3ch_lowrise_binweighted_bg005_seed20260720_epoch50_guarded`
+  on `nyc_la_off_nadir_rgb_v1`. Parameters: 3 input channels, 95 LA + 76 NYC
+  training chips, 50 epochs, learning rate 0.00003, batch size 8, AdamW,
+  EfficientNet-B0, bin-weighted low-rise/high-rise loss with edges
+  `3,6,10,25,50` and weights `4,3,2,1,3,8`, background loss weight 0.05,
+  prediction/checkpoint exports every 10 epochs, and collapse guard enabled.
+  Training completed all 50 epochs without stop-on-collapse. Final epoch-50
+  train-chip diagnostics: LA MAE 3.51 m and RMSE 5.28 m; NYC MAE 9.29 m and
+  RMSE 12.88 m; overall MAE 6.08 m and RMSE 8.66 m; 0 collapsed chips in the
+  final summary. Outputs are saved under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/nyc76_la95_offnadir_3ch_lowrise_binweighted_bg005_seed20260720_epoch50_guarded/`.
+- Generated the full diagnostics package for the off-nadir 3-channel epoch-50
+  model. Exported unmasked predictions for train, validation, test, and all
+  chips; built all-chip masked and unmasked 3 m city prediction mosaics; and
+  saved building-level scatter plots, three-panel scatter diagnostics,
+  height-bin RMSE bars, height-bin bias bars, residual boxplots, and full-city
+  PlanetScope/prediction/target three-panel plots under the run `evaluation/`
+  folder. Building-level validation diagnostics show overall RMSE 8.08 m and
+  R2 0.535, with LA RMSE 3.99 m and NYC RMSE 18.29 m.
+- Added the standard HTC-DC Net post-training diagnostics workflow. The new
+  wrapper `data_source/source/ml_models/run_htc_post_training_diagnostics.py`
+  exports split predictions, builds all-chip mosaics, runs building-level
+  scatter diagnostics, creates three-panel scatter plots, creates height-bin
+  RMSE/bias bars and residual boxplots, and creates full-city
+  PlanetScope/prediction/target panels when full-scene rasters are available.
+  The companion documentation
+  `data_source/source/ml_models/HTC_POST_TRAINING_DIAGNOSTICS_README.md`
+  records this as the preferred diagnostics package after each model run. A
+  validation-only smoke test passed on the off-nadir epoch-50 model.
+- Created and trained two independent 4-channel off-nadir HTC-DC Net variants.
+  `data_source/source/ml_models/build_htc_dataset_single_scene_variants.py`
+  builds `nyc_la_off_nadir_rgb_mask_v1` (RGB plus building-footprint mask) and
+  `nyc_la_off_nadir_rgb_nir_v1` (RGB plus PlanetScope NIR reprojected to the
+  RGB chip grid). Both datasets have 244 chips with the same 171/36/37
+  train/validation/test split as `nyc_la_off_nadir_rgb_v1`, and validation
+  checks passed for 4 input channels, 3 m resolution, CRS/grid alignment, and
+  non-empty channels. Trained both with the same off-nadir baseline parameters:
+  50 epochs, learning rate 0.00003, batch size 8, AdamW/EfficientNet-B0,
+  low-rise/high-rise bin-weighted loss, background loss weight 0.05, seed
+  `20260721`, and collapse guard enabled. Final epoch-50 collapse checks were
+  below the stop threshold for both models. Standard post-training diagnostics
+  were generated for train, validation, test, and all chips. Building-level
+  validation diagnostics: RGB+mask RMSE 7.87 m and R2 0.532; RGB+NIR RMSE
+  7.70 m and R2 0.555. The comparison table is saved as
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/offnadir_4ch_variant_comparison_epoch_050.csv`.
+- Added `data_source/source/ml_models/plot_offnadir_model_scatter_comparison.py`
+  and generated common-axis building-level scatter comparisons for the three
+  off-nadir models across training, validation, and test samples. Outputs
+  include full-distribution and 0-50 m detail figures plus a consolidated
+  metric table under
+  `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/offnadir_model_scatter_comparison_epoch_050/`.
+- Added `data_source/source/ml_models/plot_lidar_height_split_distribution.py`
+  and audited the off-nadir training, validation, and test LiDAR-height
+  distributions at the building-component level. Overall distributions are
+  similar, but NYC shows a moderate split shift: train-to-validation and
+  train-to-test KS distances are 0.083 and 0.096, with mean absolute quantile
+  differences of 2.88 m and 4.50 m. The results indicate that height-composition
+  imbalance contributes to the generalization gap but does not explain it
+  completely. Figures and tables are saved under the RGB+NIR run's
+  `evaluation/lidar_height_split_distribution_epoch_050/` folder.
+- Implemented and completed the full HTC-DC paper-recipe RGB+NIR run using the
+  original 76-NYC/95-LA training split. Preflight found that the original
+  `nyc_la_off_nadir_rgb_nir_v1` normalization statistics included all splits,
+  so `nyc_la_off_nadir_rgb_nir_full_recipe_v1` was created with identical
+  rasters and split membership but training-only four-band statistics. The new
+  workflow adds EfficientNet-B5 support, explicit AdamW weight decay, 256
+  adaptive bins, four-level `third` fusion, early HTC at 1 m, Gaussian
+  foreground and uniform background constraints, standard positive-height L1,
+  and 256/128 overlapping inference with mean and population-variance rasters.
+  All 244 chip alignments and the batch-of-eight forward/backward preflight
+  passed. Training completed 50 epochs; epoch 40 was selected with 11.9659 m
+  city-balanced validation building RMSE. Standard pooled building RMSE was
+  7.94 m on train, 8.71 m on validation, and 8.13 m on test. NYC remains the
+  primary limitation: validation RMSE was 21.16 m versus 2.77 m for LA. The
+  full recipe did not outperform the earlier RGB+NIR B0 model on pooled
+  validation RMSE (8.71 m versus 7.70 m). Outputs and an honest interpretation
+  are recorded in the run `README.md` under
+  `nyc76_la95_offnadir_rgbnir_4ch_full_htcdc_b5_seed20260723_epoch50/`.
+- Extended the Full HTC-DC training and preflight workflows with optional
+  target-height bin weighting while retaining unweighted legacy defaults.
+  Exact edges `3,6,10,25,50` m and weights `4,3,2,1,3,8` passed preflight and
+  one-epoch smoke tests. The 50-epoch weighted RGB+NIR EfficientNet-B5 run
+  completed with no collapsed validation chips. Epoch 15 was selected at
+  11.6229 m city-balanced validation building RMSE, improving the comparable
+  unweighted Full B5 result of 11.9659 m. Pooled building RMSE was 9.15 m on
+  train, 8.41 m on validation, and 8.60 m on test. NYC remains difficult
+  (19.71 m validation RMSE), and predictions still compress the high-rise
+  tail. Complete diagnostics are in the run `README.md` under
+  `nyc76_la95_offnadir_rgbnir_4ch_full_htcdc_b5_binweighted_seed20260723_epoch50/`.
+
+- Selected
+  `nyc76_la95_offnadir_rgbnir_4ch_lowrise_binweighted_bg005_seed20260721_epoch50_guarded`
+  as the primary HTC-DC Net model for continued work. The model uses one
+  off-nadir RGB+NIR PlanetScope scene per city, four channels, EfficientNet-B0,
+  50 epochs, and target-height bin weighting. It was selected by held-out
+  validation performance: pooled validation RMSE 7.70 m, validation R2 0.555,
+  and NYC validation RMSE 18.18 m. Added
+  `data_source/source/ml_models/SELECTED_HTC_DC_MODEL.md` as the canonical
+  source for its parameters, checkpoint, paths, exact rerun command, and
+  cross-computer transfer requirements. The model-ready data and checkpoint
+  remain outside Git because `data_source/data/` is ignored.
 
 ## Remaining
 
