@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-07-06
+Last updated: 2026-08-07
 
 ## Overall Plan
 
@@ -16,6 +16,22 @@ Last updated: 2026-07-06
    research outputs.
 
 ## Complete
+
+- Defined the global city sample from the WUP 2018 workbook using the strict
+  rule `POP2018 > 300` thousand. Added
+  `extract_wup2018_cities_over_300k.py` and generated
+  `wup2018_cities_over_300k_2018.csv` with 1,862 unique urban agglomerations.
+  The smallest selected population is 300,097 and the largest is 37,468,302.
+- Extended `create_city_buffers.py` with `--global-wup-cities`. Generated a
+  separate combined 5km AOI and 1,862 city-specific AOIs without overwriting
+  the completed 29-city AOI pipeline. Global slugs include the unique WUP
+  urban code to prevent same-name city collisions.
+- Added `search_planet_global_city_scenes.py` for resumable, metadata-only
+  Planet PSScene discovery across the global AOIs. It uses bounded city
+  batches and city/year checkpoints, applies permission, cloud-cover, and AOI
+  coverage filters, retains complete raw item metadata and footprint
+  coordinates, and writes honest dated logs. Offline syntax, CLI, inventory,
+  and AOI validations passed. The Planet API search itself has not been run.
 
 - Read `README.md` for the project scope, data components, methods, validation
   strategy, and expected research outputs.

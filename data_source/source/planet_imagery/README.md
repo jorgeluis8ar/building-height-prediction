@@ -12,6 +12,37 @@ Search metadata only:
 python3 data_source/source/planet_imagery/search_planet_city_scenes.py
 ```
 
+Search metadata for the 1,862-city WUP 2018 global sample in resumable batches:
+
+```bash
+python3 data_source/source/planet_imagery/search_planet_global_city_scenes.py \
+  --city-offset 0 \
+  --city-limit 25
+```
+
+Advance `--city-offset` by 25 for each batch, or use repeated `--city-slug`
+arguments for targeted runs. A zero `--city-limit` processes every city after
+the offset, but small batches are recommended because the full search spans
+many cities and annual API windows.
+
+The global search applies the established discovery filters by default:
+
+- Planet permission filter;
+- `cloud_cover < 0.30`; and
+- calculated 5km AOI coverage of at least 95 percent.
+
+It writes one atomic CSV per city plus `search_window_manifest.csv` under
+`data_source/data/planet_imagery/generated/global_city_scene_metadata/`.
+Successful city/year windows are skipped on rerun. Failed windows are marked
+failed and cause a nonzero exit, while completed data remain resumable.
+
+Each scene includes flattened acquisition and quality fields, its full
+footprint coordinates, bounding box, centroid, AOI centroid, centroid offset
+distance/direction, and AOI coverage. `properties_json`, `item_links_json`,
+and `item_json` preserve the complete API response so uncommon or future
+Planet metadata fields are not discarded. This is metadata-only: it never
+activates, orders, or downloads imagery.
+
 Search NYC/LA metadata only with Planet `view_angle` included in a separate output:
 
 ```bash

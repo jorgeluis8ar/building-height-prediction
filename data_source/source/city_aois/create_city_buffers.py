@@ -24,12 +24,14 @@ Expected runtime: < 1 minute
 """
 
 import sys
+import argparse
 import csv
 import json
 import math
 import os
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -82,6 +84,9 @@ WUP2018_CBD_FILE = PROJECT_ROOT / "data_source/data/city_aois/source/WUP2018-F22
 CITIES_SAMPLE_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/cities_sample.csv"
 CITY_BUFFERS_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/city_buffers_5km.geojson"
 CITY_BUFFERS_BY_CITY_DIR = PROJECT_ROOT / "data_source/data/city_aois/generated/city_buffers_5km_by_city"
+GLOBAL_CITIES_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/wup2018_cities_over_300k_2018.csv"
+GLOBAL_CITY_BUFFERS_FILE = PROJECT_ROOT / "data_source/data/city_aois/generated/wup2018_city_buffers_5km.geojson"
+GLOBAL_CITY_BUFFERS_BY_CITY_DIR = PROJECT_ROOT / "data_source/data/city_aois/generated/wup2018_city_buffers_5km_by_city"
 BUFFER_RADIUS_KM = 5
 CRS_GEOGRAPHIC = "EPSG:4326"
 CRS_PROJECTED = "local_geodesic_5km_buffer"
@@ -519,7 +524,11 @@ def save_city_specific_buffers(buffers_gdf, output_dir):
 
     written_files = []
     for row in buffers_gdf:
-        city_slug = slugify_city_name(row["city_name"])
+        # Global WUP city names are not unique (for example, several countries
+        # have a San Jose). The global inventory therefore supplies a slug
+        # ending in the unique WUP urban code. The legacy 29-city workflow has
+        # no city_slug column and keeps its established filenames.
+        city_slug = row.get("city_slug") or slugify_city_name(row["city_name"])
         city_output_file = output_dir / f"{city_slug}_5km.geojson"
 
         properties = {key: value for key, value in row.items() if key != "geometry"}
@@ -607,15 +616,89 @@ def visualize_buffers(buffers_gdf):
         print("Warning: GeoPandas plotting not available - skipping visualization")
 
 
+def parse_args():
+    """Choose between the established 29-city and new global WUP workflows."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--global-wup-cities",
+        action="store_true",
+        help=(
+            "Build a separate AOI set from wup2018_cities_over_300k_2018.csv. "
+            "The existing 29-city AOIs are never overwritten."
+        ),
+    )
+    return parser.parse_args()
+
+
+def read_global_wup_cities(city_list_file):
+    """Read and validate the global inventory produced by the extraction stage."""
+    if not city_list_file.is_file():
+        raise FileNotFoundError(
+            f"Missing global city inventory: {city_list_file}. Run "
+            "extract_wup2018_cities_over_300k.py first."
+        )
+    with city_list_file.open(newline="", encoding="utf-8-sig") as handle:
+        source_rows = list(csv.DictReader(handle))
+    required = {"wup_urbancode", "city_slug", "city_name", "country", "latitude", "longitude"}
+    missing = required.difference(source_rows[0].keys() if source_rows else [])
+    if missing:
+        raise ValueError(f"Global city inventory is missing columns: {sorted(missing)}")
+
+    rows = []
+    for source in source_rows:
+        row = dict(source)
+        row["city_id"] = int(source["wup_urbancode"])
+        row["lat"] = float(source["latitude"])
+        row["lon"] = float(source["longitude"])
+        row["geometry"] = {"type": "Point", "coordinates": [row["lon"], row["lat"]]}
+        rows.append(row)
+    if len({row["city_slug"] for row in rows}) != len(rows):
+        raise ValueError("Global city_slug values are not unique")
+    print(f"Loaded {len(rows):,} global WUP cities")
+    return rows
+
+
 def main():
     """Main execution function."""
+    started = datetime.now(timezone.utc)
+    log_path = (
+        PROJECT_ROOT
+        / "data_source/data/city_aois/generated/logs"
+        / f"create_city_buffers_{started.strftime('%Y%m%dT%H%M%SZ')}.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     print("=" * 70)
     print("CITY CENTROIDS AND BUFFERS CREATION")
     print("=" * 70)
     print()
 
     try:
-        # Step 0: Create the city sample from README.md and WUP 2018 CBD coordinates
+        args = parse_args()
+        if args.global_wup_cities:
+            # Keep this large new AOI set isolated from the completed 29-city
+            # pipeline. This prevents a global run from invalidating existing
+            # footprint, LiDAR, imagery, and model outputs.
+            centroids = read_global_wup_cities(GLOBAL_CITIES_FILE)
+            buffers = create_city_buffers(centroids, radius_km=BUFFER_RADIUS_KM)
+            save_buffers(buffers, GLOBAL_CITY_BUFFERS_FILE)
+            save_city_specific_buffers(buffers, GLOBAL_CITY_BUFFERS_BY_CITY_DIR)
+            print("SUCCESS: global WUP city buffers created")
+            print("Combined output:", GLOBAL_CITY_BUFFERS_FILE)
+            print("City-specific output folder:", GLOBAL_CITY_BUFFERS_BY_CITY_DIR)
+            print(f"Total cities: {len(buffers):,}")
+            log_path.write_text(
+                "status=SUCCESS\n"
+                "mode=global_wup_cities\n"
+                f"started_utc={started.isoformat()}\n"
+                f"city_count={len(buffers)}\n"
+                f"combined_output={GLOBAL_CITY_BUFFERS_FILE.relative_to(PROJECT_ROOT)}\n"
+                f"city_output_dir={GLOBAL_CITY_BUFFERS_BY_CITY_DIR.relative_to(PROJECT_ROOT)}\n",
+                encoding="utf-8",
+            )
+            print("Run log:", log_path)
+            return
+
+        # Step 0: Create the established city sample from README.md and WUP coordinates.
         write_cities_sample_from_wup2018(README_FILE, WUP2018_CBD_FILE, CITIES_SAMPLE_FILE)
 
         # Check required inputs exist
@@ -659,12 +742,27 @@ def main():
         print("  1. Download satellite data (python code/download_modis_lst/download_modis_lst_v1.py)")
         print("  2. Convert HDF4 to arrays (python code/convert_hdf_to_arrays/convert_hdf_to_arrays_v1.py)")
         print()
+        log_path.write_text(
+            "status=SUCCESS\n"
+            "mode=readme_current_cities\n"
+            f"started_utc={started.isoformat()}\n"
+            f"city_count={len(buffers)}\n",
+            encoding="utf-8",
+        )
+        print("Run log:", log_path)
 
     except Exception as e:
         print()
         print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
+        log_path.write_text(
+            "status=FAILED\n"
+            f"started_utc={started.isoformat()}\n"
+            f"error={type(e).__name__}: {e}\n",
+            encoding="utf-8",
+        )
+        print("Failure log:", log_path)
         sys.exit(1)
 
 

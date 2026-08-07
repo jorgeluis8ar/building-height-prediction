@@ -2,6 +2,30 @@
 
 This folder contains scripts for creating city area-of-interest files.
 
+## Global WUP 2018 City Sample
+
+The worldwide modeling sample uses a strict 2018 population rule. WUP values
+are in thousands, so `POP2018 > 300` means more than 300,000 people. Extract
+the inventory and then build its separate AOI set with:
+
+```bash
+python3 data_source/source/city_aois/extract_wup2018_cities_over_300k.py
+python3 data_source/source/city_aois/create_city_buffers.py --global-wup-cities
+```
+
+The verified result contains 1,862 unique urban agglomerations. The unique
+WUP urban code is appended to every slug because city names repeat globally.
+Outputs are kept separate from the established 29-city AOIs:
+
+```text
+data_source/data/city_aois/generated/wup2018_cities_over_300k_2018.csv
+data_source/data/city_aois/generated/wup2018_city_buffers_5km.geojson
+data_source/data/city_aois/generated/wup2018_city_buffers_5km_by_city/<city_slug>_5km.geojson
+```
+
+The source workbook remains read-only. Both stages write dated success/failure
+logs under `data_source/data/city_aois/generated/logs/`.
+
 ## create_city_buffers.py
 
 ### 2026-06-16 — Local virtual environment
