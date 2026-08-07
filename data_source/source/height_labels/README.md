@@ -9,6 +9,36 @@ The proposed process for converting classified point clouds into defensible
 building-level roof-to-ground heights is documented in
 `LIDAR_BUILDING_HEIGHT_PROCESS.md`.
 
+## Python Environment
+
+The primary `requirements.txt` supports both the newer project environment and
+the 64-bit Python 3.9.12 installation on the Windows training computer. Python
+environment markers automatically select compatible package versions.
+
+Create and install the Windows environment from Command Prompt:
+
+```cmd
+py -3.9 -m venv data_source\source\height_labels\venv_height_labels
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install --upgrade "pip==25.1.1" setuptools wheel
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install -r data_source\source\height_labels\requirements.txt
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip check
+```
+
+If `py -3.9` reports `No installed Python found`, the Python installation is
+not registered with the Windows launcher. Use the executable that already
+responds to `python --version` instead:
+
+```cmd
+python -m venv data_source\source\height_labels\venv_height_labels
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install --upgrade "pip==25.1.1" setuptools wheel
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install -r data_source\source\height_labels\requirements.txt
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip check
+```
+
+The separate `requirements-python39-windows.txt` records the exact Python 3.9
+lock and can be used directly for troubleshooting. Do not use the Python 3.11+
+package pins directly in a Python 3.9 environment.
+
 ## Planet-Aligned nDSM And HTC Targets
 
 `build_lidar_ndsm_raster.py` builds Planet-aligned LiDAR DSM, DTM, nDSM, and

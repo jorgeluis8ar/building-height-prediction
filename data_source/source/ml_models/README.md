@@ -115,6 +115,30 @@ band as the fourth input channel after reprojecting it to each RGB chip grid.
 Both datasets preserve the same train/validation/test split as
 `nyc_la_off_nadir_rgb_v1`.
 
+## Windows Off-Nadir RGB Rebuild
+
+`build_htc_offnadir_rgb_dataset.py` combines rebuilt LA and NYC city-level
+RGB/mask/AGL chips while preserving the selected experiment's exact split from
+lightweight reference metadata. It is Python 3.9 compatible and uses
+repository-relative paths on both Windows and macOS/Linux.
+
+Run from Windows Command Prompt after rebuilding both city-level chip sets and
+transferring the reference metadata:
+
+```cmd
+data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe data_source\source\ml_models\build_htc_offnadir_rgb_dataset.py ^
+  --la-source data_source\data\height_labels\generated\los_angeles_off_nadir_20251002_190325_64_24d1\lidar_ndsm\htc_dc_net\20251002_190325_64_24d1 ^
+  --nyc-source data_source\data\height_labels\generated\new_york_city_off_nadir_20241113_160040_50_24e0\lidar_ndsm\htc_dc_net\20241113_160040_50_24e0 ^
+  --reference-dir data_source\data\ml_models\migration_reference\nyc_la_off_nadir_rgb_v1 ^
+  --output-dir data_source\data\ml_models\generated\htc_dc_net\nyc_la_off_nadir_rgb_v1_windows_rebuild
+```
+
+The script fails immediately if reference splits overlap, chip IDs or spatial
+offsets differ, rasters are missing, RGB/mask/AGL grids are misaligned, chips
+are not 256 by 256 pixels at 3 m resolution, masks are not binary, or image and
+target values are empty. Use `--overwrite` only when intentionally replacing a
+previous Windows rebuild.
+
 Building-level validation diagnostics at epoch 50:
 
 | Variant | Validation RMSE (m) | Validation R2 | Validation bias (m) |

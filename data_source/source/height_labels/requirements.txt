@@ -1,9 +1,23 @@
-pandas==3.0.3
-pyproj==3.7.2
-shapely==2.1.2
-laspy==2.6.1
-lazrs==0.7.0
-geopandas==1.1.3
-pyogrio==0.12.1
-matplotlib==3.11.0
-rasterio==1.5.0
+# Python 3.9 is installed on the Windows training computer. Several current
+# package releases require Python 3.10 or 3.11, so keep a compatible lock for
+# Python 3.9 while retaining the newer environment on Python 3.11+.
+numpy==1.26.4; python_version < "3.11"
+pandas==2.2.3; python_version < "3.11"
+pyproj==3.6.1; python_version < "3.11"
+shapely==2.0.7; python_version < "3.11"
+laspy==2.5.4; python_version < "3.11"
+lazrs==0.6.2; python_version < "3.11"
+geopandas==0.14.4; python_version < "3.11"
+pyogrio==0.7.2; python_version < "3.11"
+matplotlib==3.8.4; python_version < "3.11"
+rasterio==1.3.10; python_version < "3.11"
+
+pandas==3.0.3; python_version >= "3.11"
+pyproj==3.7.2; python_version >= "3.11"
+shapely==2.1.2; python_version >= "3.11"
+laspy==2.6.1; python_version >= "3.11"
+lazrs==0.7.0; python_version >= "3.11"
+geopandas==1.1.3; python_version >= "3.11"
+pyogrio==0.12.1; python_version >= "3.11"
+matplotlib==3.11.0; python_version >= "3.11"
+rasterio==1.5.0; python_version >= "3.11"
