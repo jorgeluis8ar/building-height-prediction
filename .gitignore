@@ -68,3 +68,9 @@ Manifest.toml
 *.log
 tmp/
 temp/
+
+# Task-specific Python virtual environments
+.venv/
+venv/
+env/
+venv_*/

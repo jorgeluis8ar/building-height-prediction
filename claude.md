@@ -52,15 +52,18 @@ Language choice:
   batched shell commands) unless told otherwise.
 - EDITS to existing code must RESPECT the existing language of that
   code. Do not rewrite working code into another language just to
-  change language. (The existing pipeline in THIS project is Stata —
-  match it when modifying existing Stata code.)
+  change language. 
 - EXTENSIONS (new, separable functionality added to an existing
   project) should FAVOR Python where it can stand on its own without
   forcing a rewrite of the surrounding code.
 - For econometrics, use Stata, R, or Python — but ASK FIRST which to
-  use before writing econometrics code.
+  use before writing econometrics code. In general, all econometric estimations 
+  should be executed twice in different language, e.g. python and stata, and cross validated.
+- For econometrics always look for a canned routine rather than writing it from scratch. 
+- When using stata, write the absolute minimum of stata code possible. 
+  Do all bookkeeping in python. Do not pass arguments to stata.
 - ASK before using ANY language other than Python, R, Stata, or
-  batched shell commands.
+  batched shell and powershell commands.
 
 # ============================================================
 # Project file structure and conventions
@@ -75,14 +78,18 @@ default; only match Stata when editing existing Stata code.
 
 ## The master script
 - A single master script runs the whole pipeline and is the single
-  source of truth for run order. In the existing Stata pipeline this
-  is dofiles/readme_run.do. Keep it updated when tasks are added,
-  removed, or reordered.
+  source of truth for run order. This should generally be a powershell script with a name like 
+  pipeline_run_v1.ps. The advantage of a powershell driver is that it can load different python environments
+  before each call to python.  This is harder if the master is python.  Keep this program updated when tasks are added,
+  removed, or reordered.  Each pipeline task should have a small distinct block of code in the master file, in run sequence. 
+  Each of theses code blocks should include a (1) one or two line comment describing what the task is/does, and the data of last change, 
+  (2) an if statement with the logical condition (1 -eq 1) to turn the task on or off. This allows partial runs of the pipeline during development.
+  Do not put a bunch of switches for the different tasks at the top of the master file. Just   (1 -eq 1) or (1 -eq 0) at thge top the code block for each task.
 
 ## Paired code/data folders (one task = matching folders)
 Each processing task has a program folder and a data folder:
 - <code-root>/<task>/   — the program(s) for that task
-  (the existing Stata code root is dofiles/)
+- the existing code root is always `code/' or `dofiles/' (not `src/')
 - data/<task>/          — the data for that task
 
 - Match these names EXACTLY where possible. Prefer match-by-meaning
