@@ -3,4 +3,4 @@ planet
 pyproj
 shapely
 matplotlib>=3.8,<4
-cartopy>=0.24,<0.26
+cartopy==0.23.0
