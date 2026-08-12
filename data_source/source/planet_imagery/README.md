@@ -4,6 +4,70 @@ This folder contains scripts for searching Planet metadata, selecting reviewed
 city scenes, creating AOI-clipped Planet orders, and downloading completed
 orders.
 
+## Global Nine-Scene Selection
+
+`select_planet_global_city_scenes.py` selects up to nine reviewed metadata
+rows per WUP global city. It never activates assets, creates orders, or
+downloads imagery.
+
+The selector applies these documented rules:
+
+- `quality_category == standard`;
+- Northern Hemisphere summer is June-July and winter is December-January;
+- Southern Hemisphere summer is December-January and winter is June-July;
+- maximize distinct acquisition years before using repeated-year fallbacks;
+- target five summer and four winter scenes;
+- target two scenes each from the north, south, east, and west scene-centroid
+  bearing sectors, with the ninth direction selected by the overall score;
+- apply coverage/cloud tiers in this order: 100%/0%, at least 99.5%/0%, at
+  least 99.5%/at most 1%, then at least 95% with the lowest available cloud;
+- maximize the minimum sun-elevation separation among selected scenes;
+- prefer high absolute `view_angle` values; and
+- require RGB+NIR surface reflectance, preferring
+  `ortho_analytic_8b_sr` and falling back to `ortho_analytic_4b_sr`.
+
+Asset-list calls are metadata-only and are cached in
+`planet_scene_asset_availability.csv`. Failed asset calls cause a nonzero exit;
+successful checks and completed city outputs remain resumable.
+
+Test one city from Windows CMD after authenticating with `planet auth login`:
+
+```bat
+python data_source\source\planet_imagery\select_planet_global_city_scenes.py ^
+  --city-slug aba_21974 ^
+  --overwrite
+```
+
+Process a bounded batch:
+
+```bat
+python data_source\source\planet_imagery\select_planet_global_city_scenes.py ^
+  --city-offset 0 ^
+  --city-limit 25
+```
+
+Advance the offset by 25. Existing per-city selection and summary files are
+skipped unless `--overwrite` is supplied. The production outputs are:
+
+```text
+data_source/data/planet_imagery/generated/global_scene_selection/
+├── selected_global_planet_city_scenes.csv
+├── global_scene_selection_city_summary.csv
+├── global_scene_selection_shortfalls.csv
+├── planet_scene_asset_availability.csv
+├── by_city/<city_slug>_selected_planet_scenes.csv
+└── by_city_summary/<city_slug>_selection_summary.csv
+```
+
+Every selected row records its rank, hemisphere, local season, year,
+four-sector direction, filter tier, repeated-year status, target-match flags,
+sun-diversity gain, asset availability, selected asset type, and serialized
+score components. City summaries expose selection shortfalls rather than
+silently claiming that infeasible targets were met.
+
+`--skip-asset-check` exists only for offline code testing. It marks outputs as
+unverified and those outputs must never be passed to ordering.
+
 ## Scripts
 
 Search metadata only:
