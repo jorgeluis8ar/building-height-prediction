@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-08-07
+Last updated: 2026-08-11
 
 ## Overall Plan
 
@@ -16,6 +16,22 @@ Last updated: 2026-08-07
    research outputs.
 
 ## Complete
+
+- Added `select_planet_global_city_scenes.py` for deterministic selection of
+  up to nine PlanetScope scenes per WUP global city. The workflow distinguishes
+  Northern and Southern Hemisphere solstice seasons, maximizes distinct years
+  before flagged repeated-year fallbacks, balances four scene-centroid
+  directions and a five/four seasonal target, applies explicit cloud/coverage
+  tiers, maximizes sun-elevation diversity, prefers high view angles, and
+  requires RGB+NIR surface reflectance with 8-band preference and 4-band
+  fallback. Asset-list requests are cached and metadata-only; the script
+  cannot activate, order, or download imagery.
+- Offline regression-tested the global selector with the 186-row Aba, Nigeria
+  metadata file. The test selected nine unique standard-quality solstice
+  scenes, preserved seven distinct years before two repeated-year fallbacks,
+  and honestly flagged infeasible season/direction targets and the intentionally
+  skipped offline asset verification. Production runs require live asset
+  verification through the saved Planet OAuth session.
 
 - Defined the global city sample from the WUP 2018 workbook using the strict
   rule `POP2018 > 300` thousand. Added
