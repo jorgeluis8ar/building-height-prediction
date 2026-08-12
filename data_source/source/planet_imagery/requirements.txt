@@ -1,4 +1,6 @@
-pandas
+pandas>=2.2,<3
 planet
 pyproj
 shapely
+matplotlib>=3.8,<4
+cartopy>=0.24,<0.26
