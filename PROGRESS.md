@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 ## Overall Plan
 
@@ -17,6 +17,30 @@ Last updated: 2026-08-11
 
 ## Complete
 
+- Added safe Windows-compatible global training order/download scripts. The
+  order workflow creates one deterministic AOI-clipped plan per training city,
+  grouping 8-band and 4-band bundles into 711 requests for 6,350 available
+  scenes, and requires explicit bounded confirmation before contacting Planet.
+  The downloader accepts only successful orders, blocks partial fulfillment,
+  checks free disk space, verifies every delivered Planet manifest file, and
+  checkpoints each city. Both reject validation/testing rows, recover safely
+  after interruptions, and write honest dated logs. Only local dry-run and
+  simulated completeness tests have been executed; no Planet order was created
+  and no imagery was downloaded.
+- Added `create_planet_global_city_splits.py` for a stable city-level split of
+  all 1,779 cities represented in the global selected-scenes file. Seed
+  `419453` produces exactly 711 training, 711 validation, and 357 testing
+  cities using SHA-256 ordering, with every scene inheriting its city's group.
+  The script writes full and compact scene manifests plus a training order
+  input, performs no Planet API actions, and explicitly flags the 26 cities
+  with fewer than nine selected scenes.
+- Added `analyze_planet_global_scene_selection.py` for an API-free analysis of
+  the completed global scene selection. It creates a world map of all WUP AOI
+  centroids and selected-scene centroids, country city/scene counts, numeric
+  and categorical metadata summaries, an acquisition-year summary, and
+  detailed AOI/scene-footprint maps for Aba, Tokyo, and Buenos Aires. The
+  analysis explicitly retains sample cities with no selected scenes and writes
+  dated, fail-loud logs under the generated analysis folder.
 - Added `select_planet_global_city_scenes.py` for deterministic selection of
   up to nine PlanetScope scenes per WUP global city. The workflow distinguishes
   Northern and Southern Hemisphere solstice seasons, maximizes distinct years

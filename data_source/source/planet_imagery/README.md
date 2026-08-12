@@ -4,6 +4,122 @@ This folder contains scripts for searching Planet metadata, selecting reviewed
 city scenes, creating AOI-clipped Planet orders, and downloading completed
 orders.
 
+## Global Selection Analysis
+
+`analyze_planet_global_scene_selection.py` is a local, API-free analysis of
+the completed global scene selection. It overlays all 1,862 WUP city AOI
+centroids and the selected Planet scene centroids on a world map, produces
+country-level city/scene counts, summarizes numeric and categorical metadata,
+and creates detailed AOI/scene-footprint maps for Aba, Tokyo, and Buenos Aires.
+
+Install the updated visualization dependencies and run from Windows CMD:
+
+```bat
+python -m pip install -r data_source\source\planet_imagery\requirements.txt
+python data_source\source\planet_imagery\analyze_planet_global_scene_selection.py
+```
+
+The default outputs are written to:
+
+```text
+data_source/data/planet_imagery/generated/global_scene_selection_analysis/
+├── global_aoi_and_scene_centroids.png
+├── country_city_scene_summary.csv
+├── selected_scene_numeric_metadata_summary.csv
+├── selected_scene_categorical_metadata_counts.csv
+├── selected_scene_acquisition_year_summary.csv
+├── detailed_city_maps/
+│   ├── aba_21974_selected_scene_map.png
+│   ├── tokyo_21671_selected_scene_map.png
+│   └── buenos_aires_20058_selected_scene_map.png
+└── logs/analyze_planet_global_scene_selection_<UTC timestamp>.log
+```
+
+The detailed maps draw the exact scene polygons stored in
+`scene_geometry_geojson` and identify their `strip_id`. The Planet metadata
+does not contain a separate full-strip polygon, so the script does not claim
+to reconstruct geometry beyond the selected scene footprints. Override the
+three default cities by repeating `--detail-city <city_slug>` exactly three
+times.
+
+## Reproducible Global City Split
+
+`create_planet_global_city_splits.py` assigns every city represented in the
+global selected-scenes file to one mutually exclusive group. The production
+defaults use seed `419453` and exact counts of 711 training, 711 validation,
+and 357 testing cities. A stable SHA-256 score based on `seed:city_slug`
+guarantees identical results across computers and Python/Pandas versions.
+Every selected scene inherits its city's group, preventing city leakage.
+
+Run locally from Windows CMD; no Planet authorization is required:
+
+```bat
+python data_source\source\planet_imagery\create_planet_global_city_splits.py
+```
+
+Outputs are written under
+`data_source/data/planet_imagery/generated/global_scene_selection_split/`.
+`planet_scene_split_manifest.csv` contains all scenes and their assignments;
+`training_scene_order_input.csv` contains the full training rows intended for
+the first future order stage; and the three `*_scene_ids.csv` files provide
+compact per-group ID manifests. The script only writes local CSV/log files—it
+cannot activate, order, or download imagery. Cities with fewer than nine real
+selected scenes are retained and explicitly flagged rather than being padded
+with invented IDs.
+
+## Global Training Orders and Downloads
+
+The global workflow uses city-level, resumable scripts separate from the
+legacy 29-city order/download programs:
+
+- `order_planet_training_city_scenes.py` plans exactly 711 clipped city
+  orders covering the 6,350 available training scenes. Each request groups
+  that city's scenes by 8-band or 4-band surface-reflectance bundle. Its local
+  `--dry-run` does not authenticate or contact Planet. Confirmed submission is
+  bounded to 25 cities by default, checkpoints after every city, and searches
+  for the deterministic order name before creating anything so interrupted
+  reruns do not duplicate orders.
+- `download_planet_training_city_orders.py` checks completed city orders and
+  downloads at most 10 cities per call by default. It accepts only `success`,
+  blocks `partial` for manual review, checks free disk space, and marks a city
+  downloaded only after all files named by Planet's delivered `manifest.json`
+  exist locally.
+
+Both scripts reject validation/testing rows, use relative repository paths,
+write dated logs, and require explicit confirmation flags for external writes.
+They never order or download merely because the script is launched.
+
+First create and review the complete local plan from Windows CMD:
+
+```bat
+python data_source\source\planet_imagery\order_planet_training_city_scenes.py --dry-run
+```
+
+Then submit one small test city and inspect the Planet portal/manifest before
+larger batches:
+
+```bat
+python data_source\source\planet_imagery\order_planet_training_city_scenes.py ^
+  --confirm-order --city-offset 0 --city-limit 1
+```
+
+After that order reaches `success`, check it without downloading and then
+download it explicitly:
+
+```bat
+python data_source\source\planet_imagery\download_planet_training_city_orders.py ^
+  --dry-run --city-offset 0 --city-limit 1
+python data_source\source\planet_imagery\download_planet_training_city_orders.py ^
+  --confirm-download --city-offset 0 --city-limit 1
+```
+
+The shared manifest is
+`data_source/data/planet_imagery/generated/global_training_orders/planet_training_city_orders_manifest.csv`.
+Downloaded city folders are stored under
+`data_source/data/planet_imagery/source/global_training/<city_slug>/`.
+Increase offsets only after reviewing the previous batch. A zero city limit
+means all remaining cities and should not be used until the pilot succeeds.
+
 ## Global Nine-Scene Selection
 
 `select_planet_global_city_scenes.py` selects up to nine reviewed metadata
