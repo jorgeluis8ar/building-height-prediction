@@ -2,9 +2,10 @@
 """Combine all per-city Planet metadata CSV files into one global CSV.
 
 The script is local and API-free. It does not activate, order, or download any
-Planet asset. It reads the 1,862-city inventory to establish the expected file
-set, validates every city file, and writes the combined output atomically so an
-interrupted run can never look complete.
+Planet asset. It reads a city inventory to establish the expected file set,
+validates every city file, and writes the combined output atomically so an
+interrupted run can never look complete. The default inventory contains all
+1,862 cities; an explicit expected count supports validated subsets.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ DEFAULT_OUTPUT = REPOSITORY_ROOT / (
 DEFAULT_LOG_DIRECTORY = REPOSITORY_ROOT / (
     "data_source/data/planet_imagery/generated/logs"
 )
-EXPECTED_CITY_COUNT = 1_862
+DEFAULT_EXPECTED_CITY_COUNT = 1_862
 PROVENANCE_FIELD = "source_metadata_file"
 
 
@@ -42,11 +43,20 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--input-directory", type=Path, default=DEFAULT_INPUT_DIRECTORY)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
+        "--expected-city-count",
+        type=int,
+        default=DEFAULT_EXPECTED_CITY_COUNT,
+        help=(
+            "Required number of unique cities in --inventory. Use 94 with the "
+            "training/open-LiDAR city list."
+        ),
+    )
+    parser.add_argument(
         "--allow-missing-city-files",
         action="store_true",
         help=(
-            "Create an explicitly partial combined file when one or more of the "
-            "1,862 expected city files are absent. The default is to fail."
+            "Create an explicitly partial combined file when one or more "
+            "expected city files are absent. The default is to fail."
         ),
     )
     return parser.parse_args()
@@ -60,7 +70,7 @@ def resolve_project_path(path: Path) -> Path:
     return resolved
 
 
-def read_inventory(path: Path) -> list[dict[str, str]]:
+def read_inventory(path: Path, expected_city_count: int) -> list[dict[str, str]]:
     """Read the authoritative city order and reject malformed inventories."""
     if not path.is_file():
         raise FileNotFoundError(f"Missing city inventory: {path}")
@@ -72,9 +82,9 @@ def read_inventory(path: Path) -> list[dict[str, str]]:
             raise RuntimeError(f"Inventory is missing columns: {sorted(missing)}")
         rows = list(reader)
     slugs = [row["city_slug"].strip() for row in rows]
-    if len(rows) != EXPECTED_CITY_COUNT:
+    if len(rows) != expected_city_count:
         raise RuntimeError(
-            f"Expected {EXPECTED_CITY_COUNT:,} inventory cities, found {len(rows):,}"
+            f"Expected {expected_city_count:,} inventory cities, found {len(rows):,}"
         )
     if any(not slug for slug in slugs) or len(slugs) != len(set(slugs)):
         raise RuntimeError("Inventory contains blank or duplicate city_slug values")
@@ -173,7 +183,9 @@ def main() -> None:
                 "The combined output name must not match the per-city *_planet_scenes.csv pattern"
             )
 
-        inventory = read_inventory(inventory_path)
+        if arguments.expected_city_count < 1:
+            raise ValueError("expected-city-count must be at least one")
+        inventory = read_inventory(inventory_path, arguments.expected_city_count)
         expected_files = [
             (row["city_slug"], input_directory / f"{row['city_slug']}_planet_scenes.csv")
             for row in inventory
@@ -181,7 +193,7 @@ def main() -> None:
         missing_files = [(slug, path) for slug, path in expected_files if not path.is_file()]
         if missing_files and not arguments.allow_missing_city_files:
             raise FileNotFoundError(
-                f"Missing {len(missing_files):,} of {EXPECTED_CITY_COUNT:,} expected city files. "
+                f"Missing {len(missing_files):,} of {arguments.expected_city_count:,} expected city files. "
                 f"Examples: {[slug for slug, _ in missing_files[:20]]}. "
                 "Rerun the missing API queries or pass --allow-missing-city-files "
                 "to create an explicitly partial combined file."
@@ -233,6 +245,7 @@ def main() -> None:
             f"completed_utc={completed.isoformat()}",
             f"completeness={completeness}",
             f"inventory_city_count={len(inventory)}",
+            f"expected_city_count={arguments.expected_city_count}",
             f"combined_city_file_count={len(files)}",
             f"missing_city_file_count={len(missing_files)}",
             f"empty_city_file_count={empty_city_count}",

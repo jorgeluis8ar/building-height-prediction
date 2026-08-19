@@ -772,6 +772,10 @@ Last updated: 2026-08-12
   columns, adds source-file provenance, and writes the combined CSV atomically.
   A partial one-city test combined all 186 Aba rows successfully; the complete
   run awaits the full per-city metadata directory on Windows.
+- Extended the Planet metadata combiner with an explicit expected-city count,
+  allowing the same validated workflow to create a separate all-scenes table
+  for exactly the 94 training/open-LiDAR cities while retaining the strict
+  1,862-city default.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.

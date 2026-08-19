@@ -287,6 +287,19 @@ missing city file is fatal. `--allow-missing-city-files` is available only for
 an explicitly partial diagnostic output, which is labeled `PARTIAL` in its
 run log.
 
+To combine only the queried scenes for the 94 training/open-LiDAR cities, use
+their detailed city list as the inventory and require exactly 94 files:
+
+```bat
+python data_source\source\planet_imagery\combine_planet_global_city_scene_metadata.py ^
+  --inventory data_source\data\height_labels\generated\training_open_lidar\training_cities_with_open_lidar.csv ^
+  --expected-city-count 94 ^
+  --output data_source\data\planet_imagery\generated\training_lidar_year_scene_selection\all_94_training_lidar_city_scene_metadata.csv
+```
+
+This command includes every queried scene for those cities, not only the final
+eight-per-LiDAR-year selections.
+
 It writes one atomic CSV per city plus `search_window_manifest.csv` under
 `data_source/data/planet_imagery/generated/global_city_scene_metadata/`.
 Successful city/year windows are skipped on rerun. Failed windows are marked
