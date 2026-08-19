@@ -1,13 +1,14 @@
 """
-Plan and create AOI-clipped Planet orders for the 711 training cities.
+Plan and create AOI-clipped Planet orders for a validated training-city set.
 
 Environment: data_source/source/planet_imagery/venv_planet_imagery
 
 Safety model:
     - ``--dry-run`` is local only: it validates all inputs and writes/updates
-      the 711-row order manifest without authenticating or creating orders.
+      the order manifest without authenticating or creating orders.
     - ``--confirm-order`` is the only mode that may create Planet orders.
-    - Only rows marked ``training`` are accepted.
+    - Only rows marked ``training`` are accepted. A separate city inventory can
+      provide this metadata for selector outputs that contain scene fields only.
     - One order is built per city, with scene IDs grouped by product bundle.
     - Exact deterministic order names allow recovery after interruption.
     - Existing order IDs and terminal status fields are never discarded.
@@ -171,6 +172,28 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=PROJECT_ROOT / "data_source/data/planet_imagery/source/global_training",
     )
+    parser.add_argument(
+        "--city-inventory",
+        type=Path,
+        default=None,
+        help=(
+            "Optional city CSV supplying city_name, country, split metadata, and "
+            "randomized_city_rank when those fields are absent from selected scenes."
+        ),
+    )
+    parser.add_argument("--expected-city-count", type=int, default=EXPECTED_TRAINING_CITIES)
+    parser.add_argument(
+        "--expected-scenes-per-city",
+        type=int,
+        default=0,
+        help="Require exactly this many unique scenes per city; zero disables the check.",
+    )
+    parser.add_argument("--split-seed", type=int, default=EXPECTED_SPLIT_SEED)
+    parser.add_argument(
+        "--order-name-prefix",
+        default="bhp_train",
+        help="Deterministic Planet order-name prefix.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(
         "--dry-run",
@@ -242,7 +265,13 @@ def load_aoi_geometry(path: Path) -> dict[str, Any]:
     return geometry
 
 
-def build_city_order_request(city_slug: str, rows: pd.DataFrame, aoi: dict[str, Any]) -> dict[str, Any]:
+def build_city_order_request(
+    city_slug: str,
+    rows: pd.DataFrame,
+    aoi: dict[str, Any],
+    split_seed: int,
+    order_name_prefix: str,
+) -> dict[str, Any]:
     """Build one strict clipped request containing all selected city scenes."""
     products = []
     for asset_type, group in rows.groupby("selected_asset_type", sort=True):
@@ -258,7 +287,7 @@ def build_city_order_request(city_slug: str, rows: pd.DataFrame, aoi: dict[str, 
         )
     scene_ids = sorted(rows["scene_id"].astype(str).unique())
     name_digest = sha256_text("|".join(scene_ids))[:10]
-    order_name = f"bhp_train_s{EXPECTED_SPLIT_SEED}_{city_slug}_{name_digest}"
+    order_name = f"{order_name_prefix}_s{split_seed}_{city_slug}_{name_digest}"
     return order_request.build_request(
         name=order_name,
         products=products,
@@ -268,7 +297,16 @@ def build_city_order_request(city_slug: str, rows: pd.DataFrame, aoi: dict[str, 
     )
 
 
-def build_plan(selected_path: Path, aoi_dir: Path, download_root: Path) -> pd.DataFrame:
+def build_plan(
+    selected_path: Path,
+    aoi_dir: Path,
+    download_root: Path,
+    city_inventory_path: Path | None,
+    expected_city_count: int,
+    expected_scenes_per_city: int,
+    split_seed: int,
+    order_name_prefix: str,
+) -> pd.DataFrame:
     """Convert the training scene table into exactly one planned row per city."""
     if not selected_path.is_file():
         raise FileNotFoundError(f"Missing training scene input: {selected_path}")
@@ -276,26 +314,61 @@ def build_plan(selected_path: Path, aoi_dir: Path, download_root: Path) -> pd.Da
         selected_path,
         dtype={"city_slug": str, "scene_id": str, "split_group": str},
     )
-    required = {
-        "split_seed", "split_group", "randomized_city_rank", "city_slug",
-        "city_name", "country", "scene_id", "selection_rank",
-        "selected_asset_type",
-    }
+    required = {"city_slug", "scene_id", "selection_rank", "selected_asset_type"}
     missing = sorted(required - set(selected.columns))
     if missing:
         raise ValueError(f"Training scene input is missing columns: {missing}")
     if selected.empty or selected[["city_slug", "scene_id"]].duplicated().any():
         raise ValueError("Training scene input is empty or has duplicate city/scene rows")
-    if set(selected["split_group"].dropna().unique()) != {"training"}:
+    if city_inventory_path is not None:
+        if not city_inventory_path.is_file():
+            raise FileNotFoundError(f"Missing city inventory: {city_inventory_path}")
+        inventory = pd.read_csv(city_inventory_path, dtype={"city_slug": str})
+        inventory_required = {
+            "city_slug", "city_name", "country", "split_group", "split_seed",
+            "randomized_city_rank",
+        }
+        inventory_missing = sorted(inventory_required - set(inventory.columns))
+        if inventory_missing:
+            raise ValueError(f"City inventory is missing columns: {inventory_missing}")
+        if inventory["city_slug"].duplicated().any():
+            raise ValueError("City inventory contains duplicate city_slug rows")
+        metadata_columns = [
+            "city_slug", "city_name", "country", "split_group", "split_seed",
+            "randomized_city_rank",
+        ]
+        selected = selected.drop(
+            columns=[column for column in metadata_columns[1:] if column in selected.columns]
+        ).merge(inventory[metadata_columns], on="city_slug", how="left", validate="many_to_one")
+
+    metadata_required = {
+        "city_name", "country", "split_group", "split_seed", "randomized_city_rank"
+    }
+    metadata_missing = sorted(metadata_required - set(selected.columns))
+    if metadata_missing:
+        raise ValueError(
+            f"Selected scenes lack city/order metadata {metadata_missing}; pass --city-inventory."
+        )
+    if selected[list(metadata_required)].isna().any().any():
+        raise ValueError("Selected scenes contain blank city/order metadata after inventory join")
+    if set(selected["split_group"].astype(str).unique()) != {"training"}:
         raise ValueError("Refusing input containing validation/testing scenes")
     seeds = set(pd.to_numeric(selected["split_seed"], errors="raise").astype(int))
-    if seeds != {EXPECTED_SPLIT_SEED}:
-        raise ValueError(f"Expected split seed {EXPECTED_SPLIT_SEED}; found {sorted(seeds)}")
-    if selected["city_slug"].nunique() != EXPECTED_TRAINING_CITIES:
+    if seeds != {split_seed}:
+        raise ValueError(f"Expected split seed {split_seed}; found {sorted(seeds)}")
+    if selected["city_slug"].nunique() != expected_city_count:
         raise ValueError(
-            f"Expected {EXPECTED_TRAINING_CITIES} training cities; found "
+            f"Expected {expected_city_count} training cities; found "
             f"{selected['city_slug'].nunique()}"
         )
+    if expected_scenes_per_city:
+        counts = selected.groupby("city_slug")["scene_id"].nunique()
+        bad = counts[counts != expected_scenes_per_city]
+        if not bad.empty:
+            raise ValueError(
+                f"Expected {expected_scenes_per_city} scenes per city; mismatches: "
+                f"{bad.head(20).to_dict()}"
+            )
 
     records: list[dict[str, Any]] = []
     for city_slug, rows in selected.groupby("city_slug", sort=False):
@@ -305,7 +378,9 @@ def build_plan(selected_path: Path, aoi_dir: Path, download_root: Path) -> pd.Da
             raise ValueError(f"Conflicting city metadata for {city_slug}")
         aoi_path = aoi_dir / f"{city_slug}_5km.geojson"
         aoi = load_aoi_geometry(aoi_path)
-        request = build_city_order_request(city_slug, rows, aoi)
+        request = build_city_order_request(
+            city_slug, rows, aoi, split_seed, order_name_prefix
+        )
         scene_ids = sorted(rows["scene_id"].astype(str).unique())
         if len(scene_ids) > MAX_PLANET_ITEMS_PER_ORDER:
             raise ValueError(f"{city_slug} exceeds Planet's 500-item order limit")
@@ -317,7 +392,7 @@ def build_plan(selected_path: Path, aoi_dir: Path, download_root: Path) -> pd.Da
         request_json = canonical_json(request)
         records.append(
             {
-                "split_seed": EXPECTED_SPLIT_SEED,
+                "split_seed": split_seed,
                 "split_group": "training",
                 "randomized_city_rank": int(city["randomized_city_rank"]),
                 "city_slug": city_slug,
@@ -339,7 +414,7 @@ def build_plan(selected_path: Path, aoi_dir: Path, download_root: Path) -> pd.Da
             }
         )
     plan = pd.DataFrame.from_records(records).sort_values("randomized_city_rank").reset_index(drop=True)
-    if len(plan) != EXPECTED_TRAINING_CITIES or int(plan["selected_scene_count"].sum()) != len(selected):
+    if len(plan) != expected_city_count or int(plan["selected_scene_count"].sum()) != len(selected):
         raise AssertionError("City order plan does not reconcile to training scene input")
     return plan
 
@@ -465,7 +540,14 @@ async def submit_with_retries(
 async def async_main() -> int:
     """Plan all orders locally, then optionally submit one bounded city batch."""
     args = parse_args()
-    if args.city_offset < 0 or args.city_limit < 0 or args.request_pause < 0 or args.max_retries < 1:
+    if (
+        args.city_offset < 0
+        or args.city_limit < 0
+        or args.request_pause < 0
+        or args.max_retries < 1
+        or args.expected_city_count < 1
+        or args.expected_scenes_per_city < 0
+    ):
         raise ValueError("Offsets, limits, pauses, and retries must be nonnegative/positive")
     selected_path = resolve_project_path(args.selected_scenes)
     manifest_path = resolve_project_path(args.manifest, output=True)
@@ -473,10 +555,22 @@ async def async_main() -> int:
     print(f"Run log: {log_path}", flush=True)
     aoi_dir = resolve_project_path(args.aoi_dir)
     download_root = resolve_project_path(args.download_root, output=True)
+    city_inventory_path = (
+        resolve_project_path(args.city_inventory) if args.city_inventory is not None else None
+    )
     if not aoi_dir.is_dir():
         raise FileNotFoundError(f"Missing global AOI directory: {aoi_dir}")
 
-    plan = build_plan(selected_path, aoi_dir, download_root)
+    plan = build_plan(
+        selected_path=selected_path,
+        aoi_dir=aoi_dir,
+        download_root=download_root,
+        city_inventory_path=city_inventory_path,
+        expected_city_count=args.expected_city_count,
+        expected_scenes_per_city=args.expected_scenes_per_city,
+        split_seed=args.split_seed,
+        order_name_prefix=args.order_name_prefix,
+    )
     manifest = reconcile_manifest(plan, load_existing_manifest(manifest_path))
     atomic_write_manifest(manifest, manifest_path)
     total_scenes = int(pd.to_numeric(manifest["selected_scene_count"]).sum())

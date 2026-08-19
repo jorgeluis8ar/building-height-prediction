@@ -836,6 +836,32 @@ python3 data_source/source/height_labels/build_lidar_ndsm_raster.py \
   --overwrite
 ```
 
+Generic classified point-cloud run (Windows CMD):
+
+```cmd
+python data_source\source\height_labels\build_lidar_ndsm_raster.py ^
+  --city boston_22939 ^
+  --lidar-input data_source\data\height_labels\source\boston_22939\point_cloud ^
+  --lidar-input-type point_cloud ^
+  --footprints data_source\data\building_footprints\generated\boston_22939\boston_22939_building_footprints_merged_5km.gpkg ^
+  --overwrite
+```
+
+Existing nDSM run (Windows CMD):
+
+```cmd
+python data_source\source\height_labels\build_lidar_ndsm_raster.py ^
+  --city newport_22865 ^
+  --lidar-input data_source\data\height_labels\source\newport_22865\ndsm ^
+  --lidar-input-type ndsm_raster ^
+  --footprints data_source\data\building_footprints\generated\newport_22865\newport_22865_building_footprints_merged_5km.gpkg ^
+  --overwrite
+```
+
+The second command expects the TIFF inputs to contain nDSM/above-ground height,
+not absolute DSM elevation. A DSM without its corresponding DTM is insufficient
+for deriving building height.
+
 The diagnostic nDSM raster is written to:
 
 ```text
@@ -902,13 +928,31 @@ stats/image_stats.pickle
 
 Important implementation choices:
 
+- By default the script recursively discovers every downloaded analytic SR
+  raster under `data_source/data/planet_imagery/source/<city_slug>/`. It groups
+  scenes by the complete grid signature (CRS, affine transform, dimensions,
+  bounds, and resolution), requires a strict majority, and uses the
+  lexicographically first raster on that grid as the deterministic template.
+  Minority-grid scenes are recorded as outliers rather than silently used.
+- The per-city Planet grid audit is written to
+  `data_source/data/height_labels/generated/<output_label>/lidar_ndsm/<output_label>_planet_grid_audit.csv`.
 - The script filters
   `data_source/data/height_labels/generated/usgs_3dep_tile_manifest.csv` to
   the requested `city_slug` and `project_directory`.
+- For non-USGS sources, pass one or more repository-relative files or folders
+  with `--lidar-input`. LAS/LAZ inputs are treated as point clouds; single-band
+  TIFF inputs are treated as existing nDSM rasters. Mixed inputs fail loudly.
 - LAZ points are projected to the Planet CRS and accumulated directly onto the
   Planet 3 m grid; there is no separate intermediate raster grid.
-- Class 2 points define the observed DTM. Classes 7, 9, 17, 18 and withheld
-  points are excluded. Remaining non-ground points define the DSM.
+- Before allocating the output surfaces, the script scans every point-cloud
+  classification and writes `<output_label>_lidar_classification_audit.csv`.
+  Standard class 2 defines ground. If class 2 is absent, processing stops and
+  reports all observed class counts; use `--ground-class` only after checking
+  the source provider's classification specification. Classes 7, 9, 17, 18
+  and withheld points are excluded. Remaining non-ground points define the DSM.
+- Existing nDSM GeoTIFFs are reprojected and mosaicked directly onto the
+  majority Planet grid. Their unavailable DSM/DTM diagnostic bands remain
+  nodata rather than being fabricated.
 - Missing DTM cells are filled with `rasterio.fill.fillnodata` using a default
   search distance of 250 pixels, equal to 750 m on the 3 m Planet grid.
 - The HTC `_AGL.tif` target uses the building-only nDSM, equivalent to band 6
@@ -957,3 +1001,15 @@ flight-lot interval; it must not be interpreted as one exact flight year.
 The script reads exact metadata from the USGS 3DEP, CanElevation, and England
 Environment Agency indexes. Other rows use documented official national,
 regional, city, or flight-lot periods. It downloads no LiDAR or imagery data.
+
+## Planet raster-grid audit for LiDAR alignment
+
+Run `audit_planet_raster_grids.py` to read authoritative CRS and grid metadata
+from downloaded Planet analytic surface-reflectance GeoTIFF headers. The
+default audit covers Los Angeles and New York City, excludes UDM2 masks, and
+writes detailed per-scene and city-summary CSVs under
+`data_source/data/height_labels/generated/planet_raster_grid_audit/`.
+
+The audit compares EPSG/WKT, pixel size, dimensions, bounds, affine transform,
+bands, data type, and NoData. Matching CRS alone is not treated as proof of
+matching pixel grids.
