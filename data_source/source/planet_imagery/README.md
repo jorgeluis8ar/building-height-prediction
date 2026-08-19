@@ -184,6 +184,58 @@ silently claiming that infeasible targets were met.
 `--skip-asset-check` exists only for offline code testing. It marks outputs as
 unverified and those outputs must never be passed to ordering.
 
+## Training LiDAR-year eight-scene selection
+
+`select_planet_scenes_for_training_lidar_years.py` is a separate selector for
+the 94 cities that are both in the Planet training split and ready for open
+LiDAR. It selects up to eight scenes independently for each defensible LiDAR
+acquisition year and never overwrites the original 1,862-city selection.
+
+The scene rules remain standard quality, hemisphere-aware June-July and
+December-January solstice seasons, the established AOI/cloud tiers, RGB+NIR
+surface reflectance with 8-band preference and 4-band fallback, sun-elevation
+diversity, high absolute view angle, and low haze/shadow/snow. Each city-year
+targets four summer and four winter scenes and two scenes in each of the north,
+south, east, and west scene-centroid sectors.
+
+The temporal rules are intentionally strict. Exact semicolon-separated years
+are processed separately from 2016 onward. Two-year flight/project ranges use
+both endpoint years. Broad campaign, catalogue, or national ranges are not
+expanded into unsupported annual dates. Pre-2016 years are reported and never
+replaced with later imagery.
+
+After Planet authentication, test one eligible city from Windows CMD:
+
+```bat
+python data_source\source\planet_imagery\select_planet_scenes_for_training_lidar_years.py ^
+  --city-slug boston_22939 ^
+  --overwrite
+```
+
+Run all 94 input cities, including explicit temporal exclusions:
+
+```bat
+python data_source\source\planet_imagery\select_planet_scenes_for_training_lidar_years.py ^
+  --city-offset 0 ^
+  --city-limit 0
+```
+
+Outputs are written under:
+
+```text
+data_source/data/planet_imagery/generated/training_lidar_year_scene_selection/
+├── selected_training_lidar_year_planet_scenes.csv
+├── training_lidar_year_eligibility.csv
+├── training_lidar_year_scene_selection_summary.csv
+├── training_lidar_year_scene_selection_shortfalls.csv
+├── planet_scene_asset_availability.csv
+├── by_city_year/<city_slug>_<year>_selected_planet_scenes.csv
+└── by_city_year_summary/<city_slug>_<year>_selection_summary.csv
+```
+
+The script performs selection and asset-list metadata checks only. It does not
+activate, order, or download Planet imagery or LiDAR.
+
 ## Scripts
 
 Search metadata only:
@@ -210,6 +262,30 @@ The global search applies the established discovery filters by default:
 - Planet permission filter;
 - `cloud_cover < 0.30`; and
 - calculated 5km AOI coverage of at least 95 percent.
+
+### Combine all global query metadata
+
+`combine_planet_global_city_scene_metadata.py` combines the 1,862 per-city
+query files into one CSV without contacting Planet:
+
+```bat
+python data_source\source\planet_imagery\combine_planet_global_city_scene_metadata.py
+```
+
+The complete output is:
+
+```text
+data_source/data/planet_imagery/generated/global_city_scene_metadata/all_global_planet_city_scene_metadata.csv
+```
+
+The script validates the inventory count, expected filename for every city,
+city slug inside every row, required metadata columns, and uniqueness of
+`scene_id` within each city. It builds a union of columns, appends
+`source_metadata_file` for provenance, streams rows to avoid holding the full
+global table in memory, and replaces the output atomically. By default, any
+missing city file is fatal. `--allow-missing-city-files` is available only for
+an explicitly partial diagnostic output, which is labeled `PARTIAL` in its
+run log.
 
 It writes one atomic CSV per city plus `search_window_manifest.csv` under
 `data_source/data/planet_imagery/generated/global_city_scene_metadata/`.
