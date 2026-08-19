@@ -776,6 +776,13 @@ Last updated: 2026-08-12
   allowing the same validated workflow to create a separate all-scenes table
   for exactly the 94 training/open-LiDAR cities while retaining the strict
   1,862-city default.
+- Extended the LiDAR-year Planet selector to accept the consolidated 94-city
+  scene-metadata CSV directly while preserving the original per-city input
+  mode. The 231 MB combined file validated at 57,481 unique scene rows across
+  exactly 94 cities. An offline Boston test selected eight unique 2021 scenes
+  with exact 4/4 solstice-season and 2/2/2/2 cardinal-direction balance; asset
+  checks were deliberately skipped for this no-API test and remain required
+  for production output.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.

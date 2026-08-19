@@ -130,6 +130,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--combined-metadata", type=Path,
+        help=(
+            "Optional single CSV containing all queried scenes for the 94 cities. "
+            "When supplied, this replaces reads from --metadata-dir."
+        ),
+    )
+    parser.add_argument(
         "--output-dir", type=Path,
         default=PROJECT_ROOT / (
             "data_source/data/planet_imagery/generated/"
@@ -196,6 +203,86 @@ def select_city_batch(frame: pd.DataFrame, args: argparse.Namespace) -> pd.DataF
     if selected.empty:
         raise ValueError("The requested city batch is empty")
     return selected
+
+
+def prepare_metadata_frame(
+    frame: pd.DataFrame,
+    expected_city_slug: str,
+    source_label: str,
+) -> pd.DataFrame:
+    """Validate and normalize one city's rows from a combined metadata table."""
+    required = {
+        "wup_urbancode", "city_slug", "city_name", "country", "scene_id",
+        "acquired", "cloud_cover", "quality_category", "sun_elevation",
+        "view_angle", "aoi_coverage_percent", "aoi_centroid_latitude",
+        "scene_centroid_bearing_degrees",
+    }
+    missing = required.difference(frame.columns)
+    if missing:
+        raise ValueError(f"{source_label} is missing required columns: {sorted(missing)}")
+    frame = frame.copy()
+    if frame.empty:
+        return frame
+    slugs = set(frame["city_slug"].dropna().astype(str))
+    if slugs != {expected_city_slug}:
+        raise ValueError(f"{source_label} contains unexpected city slugs: {sorted(slugs)}")
+    if frame["scene_id"].astype(str).duplicated().any():
+        raise ValueError(f"{source_label} contains duplicate scene_id values")
+    for column in global_selector.NUMERIC_COLUMNS:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    essential_numeric = [
+        "aoi_coverage_percent", "cloud_cover", "sun_elevation", "view_angle",
+        "aoi_centroid_latitude", "scene_centroid_bearing_degrees",
+    ]
+    if frame[essential_numeric].isna().any().any():
+        bad = frame[essential_numeric].isna().sum()
+        raise ValueError(
+            f"{source_label} has missing/non-numeric selection metadata: "
+            f"{bad[bad > 0].to_dict()}"
+        )
+    frame["acquired_dt"] = pd.to_datetime(frame["acquired"], utc=True, errors="raise")
+    frame["selection_calendar_year"] = frame["acquired_dt"].dt.year.astype(int)
+    frame["acquired_month"] = frame["acquired_dt"].dt.month.astype(int)
+    return frame
+
+
+def load_combined_metadata(
+    path: Path,
+    expected_city_slugs: set[str],
+) -> dict[str, pd.DataFrame]:
+    """Load and validate one combined 94-city file once, grouped by city.
+
+    The file is read once rather than rescanned for each city. This is faster
+    on Windows and avoids creating another set of temporary per-city files.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing combined Planet metadata CSV: {path}")
+    frame = pd.read_csv(path, low_memory=False, dtype={"city_slug": str, "scene_id": str})
+    if frame.empty:
+        raise ValueError(f"Combined Planet metadata CSV is empty: {path}")
+    required = {"city_slug", "scene_id"}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise ValueError(f"Combined metadata is missing columns: {sorted(missing)}")
+    if frame[["city_slug", "scene_id"]].isna().any().any():
+        raise ValueError("Combined metadata contains blank city_slug or scene_id values")
+    if frame[["city_slug", "scene_id"]].duplicated().any():
+        raise ValueError("Combined metadata contains duplicate city_slug/scene_id pairs")
+    actual_city_slugs = set(frame["city_slug"].astype(str))
+    missing_cities = sorted(expected_city_slugs.difference(actual_city_slugs))
+    extra_cities = sorted(actual_city_slugs.difference(expected_city_slugs))
+    if missing_cities or extra_cities:
+        raise ValueError(
+            "Combined metadata city set does not equal the 94-city input. "
+            f"Missing={missing_cities[:20]}; extra={extra_cities[:20]}"
+        )
+    grouped = {}
+    for city_slug, city_frame in frame.groupby("city_slug", sort=False):
+        slug = str(city_slug)
+        grouped[slug] = prepare_metadata_frame(
+            city_frame, slug, f"{path.name}:{slug}"
+        )
+    return grouped
 
 
 def interpret_lidar_years(row: pd.Series) -> dict[str, Any]:
@@ -454,6 +541,8 @@ async def main() -> None:
     try:
         args.training_lidar_cities = resolve_project_path(args.training_lidar_cities)
         args.metadata_dir = resolve_project_path(args.metadata_dir)
+        if args.combined_metadata is not None:
+            args.combined_metadata = resolve_project_path(args.combined_metadata)
         args.output_dir = resolve_project_path(args.output_dir)
         if args.city_offset < 0 or args.city_limit < 0:
             raise ValueError("city-offset and city-limit cannot be negative")
@@ -466,6 +555,19 @@ async def main() -> None:
         selected_cities = select_city_batch(all_cities, args)
         args.output_dir.mkdir(parents=True, exist_ok=True)
 
+        combined_metadata_by_city = None
+        if args.combined_metadata is not None:
+            print(f"Loading combined metadata once: {args.combined_metadata}", flush=True)
+            combined_metadata_by_city = load_combined_metadata(
+                args.combined_metadata,
+                set(all_cities["city_slug"].astype(str)),
+            )
+            print(
+                f"Validated combined metadata: {len(combined_metadata_by_city)} cities, "
+                f"{sum(len(frame) for frame in combined_metadata_by_city.values()):,} scene rows",
+                flush=True,
+            )
+
         # Always write the full 94-city temporal audit, even for a small test
         # batch, so excluded ranges and pre-2016 years remain visible.
         eligibility = []
@@ -477,7 +579,7 @@ async def main() -> None:
             ELIGIBILITY_COLUMNS,
         )
 
-        missing_metadata = [
+        missing_metadata = [] if combined_metadata_by_city is not None else [
             str(city["city_slug"])
             for _, city in selected_cities.iterrows()
             if interpret_lidar_years(city)["eligible_years"]
@@ -503,9 +605,12 @@ async def main() -> None:
             if not years:
                 print(f"[{number}/{len(selected_cities)}] {slug}: {interpretation['status']}", flush=True)
                 continue
-            metadata = global_selector.load_city_metadata(
-                args.metadata_dir / f"{slug}_planet_scenes.csv", slug
-            )
+            if combined_metadata_by_city is not None:
+                metadata = combined_metadata_by_city[slug].copy()
+            else:
+                metadata = global_selector.load_city_metadata(
+                    args.metadata_dir / f"{slug}_planet_scenes.csv", slug
+                )
             all_candidates, _ = global_selector.prepare_candidates(metadata)
             for year in years:
                 attempts += 1
@@ -566,6 +671,7 @@ async def main() -> None:
             f"completed_city_year_count={completed}",
             f"skipped_city_year_count={skipped}",
             f"skip_asset_check={args.skip_asset_check}",
+            f"combined_metadata={args.combined_metadata or ''}",
             f"output_dir={args.output_dir.relative_to(PROJECT_ROOT)}",
         ])
         log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")

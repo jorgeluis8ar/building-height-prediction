@@ -220,6 +220,21 @@ python data_source\source\planet_imagery\select_planet_scenes_for_training_lidar
   --city-limit 0
 ```
 
+When the per-city query files have already been consolidated, the selector can
+read the single 94-city CSV directly:
+
+```bat
+python data_source\source\planet_imagery\select_planet_scenes_for_training_lidar_years.py ^
+  --combined-metadata data_source\data\planet_imagery\generated\training_lidar_year_scene_selection\all_94_training_lidar_city_scene_metadata.csv ^
+  --city-offset 0 ^
+  --city-limit 0
+```
+
+The combined file is loaded and validated once. Its city set must equal the
+94-city LiDAR input exactly, and every `city_slug`/`scene_id` pair must be
+unique. Without `--combined-metadata`, the original per-city-directory mode
+remains available.
+
 Outputs are written under:
 
 ```text
