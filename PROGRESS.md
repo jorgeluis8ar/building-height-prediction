@@ -1,6 +1,6 @@
 # Project Progress
 
-Last updated: 2026-08-12
+Last updated: 2026-08-19
 
 ## Overall Plan
 
@@ -793,6 +793,29 @@ Last updated: 2026-08-12
   flagged pre-LiDAR fallbacks for Newport, and three are flagged non-solstice
   fallbacks for Miami. Live RGB+NIR asset verification remains required before
   treating the production output as order-compatible.
+- Added `audit_planet_raster_grids.py` and inspected all 14 downloaded analytic
+  surface-reflectance GeoTIFFs currently available for Los Angeles and New York
+  City. All seven Los Angeles rasters share EPSG:32611 and an identical 3 m
+  grid; all seven New York City rasters share EPSG:32618 and a second identical
+  3 m grid. The cities therefore differ in projection, while every scene grid
+  is internally consistent within its city. Detailed header and summary CSVs
+  were written for downstream LiDAR rasterization checks.
+- Generalized `build_lidar_ndsm_raster.py` for the downloaded global-city
+  directory layout. The script now audits all Planet analytic SR rasters for a
+  city, selects a strict-majority complete grid, records minority-grid outliers,
+  and verifies the nDSM against every majority-grid scene. It supports explicit
+  classified LAS/LAZ inputs and existing single-band nDSM GeoTIFFs. Point-cloud
+  runs now inventory classifications before rasterization and stop if the
+  confirmed ground class (standard class 2 by default) is absent. Existing nDSM
+  rasters are reprojected onto the selected Planet grid. No LiDAR payload was
+  downloaded or processed as part of this source-code change.
+- Generalized `order_planet_training_city_scenes.py` without changing its
+  original 711-city defaults. Explicit arguments now allow the authoritative
+  94 training/open-LiDAR cities to be joined to their training inventory,
+  require exactly eight scenes per city, use distinct deterministic order
+  names, and write a separate resumable manifest. An API-free in-memory test
+  reconciled exactly 94 city orders and 752 unique city-scene rows. No Planet
+  order was submitted and no imagery was downloaded during development.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.

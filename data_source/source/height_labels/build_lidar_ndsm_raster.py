@@ -4,8 +4,11 @@ Build Planet-Aligned LiDAR nDSM And HTC-DC Net Inputs
 Environment: data_source/source/height_labels/venv_height_labels
 
 Description:
-    Builds LiDAR-derived DSM, DTM, and nDSM rasters on the exact grid of a
-    downloaded PlanetScope scene. It can also export HTC-DC-Net-style files:
+    Audits every downloaded PlanetScope scene for a city, chooses the strict-
+    majority complete raster grid, and builds one city/project nDSM on that
+    grid. Classified LAS/LAZ inputs produce DSM, DTM, and nDSM surfaces;
+    existing nDSM GeoTIFFs are reprojected onto the same grid. The script can
+    also export HTC-DC-Net-style files:
 
         image/<chip_id>_IMG.tif   3-band RGB Planet chip
         mask/<chip_id>_BLG.tif    building footprint mask chip
@@ -20,6 +23,7 @@ Description:
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 from datetime import datetime, timezone
 import logging
@@ -41,7 +45,6 @@ VENV_PYTHON = VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/pyth
 VENV_MARKER = "HEIGHT_LABELS_VENV_ACTIVE"
 
 NODATA_VALUE = -9999.0
-GROUND_CLASSES = {2}
 EXCLUDED_CLASSES = {7, 9, 17, 18}
 
 HEIGHT_GENERATED_DIR = PROJECT_ROOT / "data_source/data/height_labels/generated"
@@ -51,11 +54,6 @@ FOOTPRINT_GENERATED_DIR = PROJECT_ROOT / "data_source/data/building_footprints/g
 DEFAULT_LIDAR_PROJECT = {
     "new_york_city": "NY_New_York_CMGP_SANDY_LiDAR_15",
     "los_angeles": "CA_LosAngeles_B23",
-}
-
-DEFAULT_TEMPLATE_SCENE_ID = {
-    "new_york_city": "20200122_154449_92_1061",
-    "los_angeles": "20231203_182937_07_2488",
 }
 
 DEFAULT_FOOTPRINT_PATH = {
@@ -110,9 +108,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--city",
-        choices=sorted(DEFAULT_LIDAR_PROJECT),
         default="new_york_city",
-        help="City folder to process.",
+        help=(
+            "City folder/slug to process. Planet scenes are discovered recursively "
+            "under data_source/data/planet_imagery/source/<city>/."
+        ),
     )
     parser.add_argument(
         "--lidar-project",
@@ -125,7 +125,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--template-scene-id",
         default=None,
-        help="Planet scene ID whose grid should be used as the output template.",
+        help=(
+            "Optional scene ID override. By default, audit every downloaded scene "
+            "and use the first scene on the majority grid."
+        ),
+    )
+    parser.add_argument(
+        "--lidar-input",
+        action="append",
+        help=(
+            "LiDAR point-cloud file/directory or an existing nDSM GeoTIFF. May be "
+            "repeated. Relative paths are resolved from the repository root. "
+            "Without this option, point clouds come from the USGS manifest."
+        ),
+    )
+    parser.add_argument(
+        "--lidar-input-type",
+        choices=["auto", "point_cloud", "ndsm_raster"],
+        default="auto",
+        help="Input interpretation. Default: infer from file extensions and names.",
+    )
+    parser.add_argument(
+        "--ground-class",
+        type=int,
+        default=2,
+        help=(
+            "LAS classification used as ground. Default: standard class 2. A "
+            "classification preflight must find it before full processing."
+        ),
     )
     parser.add_argument(
         "--output-label",
@@ -211,11 +238,11 @@ def slugify(value: str) -> str:
     return cleaned or "output"
 
 
-def output_label_for(city: str, lidar_project: str, output_label: str | None) -> str:
+def output_label_for(city: str, lidar_project: str | None, output_label: str | None) -> str:
     """Choose an output label for this run."""
     if output_label:
         return slugify(output_label)
-    if city == "new_york_city" and lidar_project.startswith("NJ_New_Jersey"):
+    if city == "new_york_city" and lidar_project and lidar_project.startswith("NJ_New_Jersey"):
         return "new_york_city_new_jersey_lidar"
     return city
 
@@ -250,19 +277,112 @@ def scene_id_from_planet_tif(path: Path) -> str:
     return path.name.split("_3B_", maxsplit=1)[0]
 
 
-def find_planet_template(city: str, scene_id: str) -> Path:
-    """Find one downloaded Planet TIFF to use as the output grid template."""
-    matches = [
-        path
-        for path in sorted((PLANET_SOURCE_DIR / city).rglob("*_3B_AnalyticMS_SR*_clip.tif"))
-        if scene_id_from_planet_tif(path) == scene_id
-    ]
-    if len(matches) != 1:
+def find_planet_scenes(city: str) -> list[Path]:
+    """Find downloaded analytic surface-reflectance rasters for one city."""
+    city_dir = PLANET_SOURCE_DIR / city
+    if not city_dir.exists():
+        raise FileNotFoundError(f"Missing Planet city directory: {city_dir}")
+
+    # Planet order folders differ by computer and acquisition batch, so search
+    # recursively. UDM/UDM2 masks are intentionally excluded by this pattern.
+    scenes = sorted(city_dir.rglob("*_3B_AnalyticMS_SR*_clip.tif"))
+    if not scenes:
+        raise FileNotFoundError(f"No downloaded Planet analytic SR rasters found in {city_dir}")
+
+    scene_ids = [scene_id_from_planet_tif(path) for path in scenes]
+    duplicates = sorted(scene_id for scene_id, count in Counter(scene_ids).items() if count > 1)
+    if duplicates:
+        raise RuntimeError(f"Duplicate downloaded Planet scene IDs for {city}: {duplicates}")
+    return scenes
+
+
+def planet_grid_signature(path: Path) -> tuple[Any, ...]:
+    """Return the complete pixel grid identity used for majority voting."""
+    import rasterio
+
+    with rasterio.open(path) as src:
+        if src.crs is None:
+            raise RuntimeError(f"Planet raster has no CRS: {path}")
+        # Rounding prevents harmless floating serialization noise from splitting
+        # otherwise identical grids while retaining sub-millimetre precision.
+        transform = tuple(round(value, 9) for value in tuple(src.transform))
+        bounds = tuple(round(value, 6) for value in tuple(src.bounds))
+        resolution = tuple(round(abs(value), 9) for value in src.res)
+        return (src.crs.to_wkt(), transform, src.width, src.height, bounds, resolution)
+
+
+def select_majority_planet_grid(
+    city: str,
+    requested_scene_id: str | None,
+    audit_path: Path,
+) -> tuple[Path, list[Path], list[Path]]:
+    """Audit all scenes and choose a deterministic raster on the majority grid."""
+    import rasterio
+
+    scenes = find_planet_scenes(city)
+    signatures = {path: planet_grid_signature(path) for path in scenes}
+    counts = Counter(signatures.values())
+    majority_signature, majority_count = counts.most_common(1)[0]
+    tied = sum(1 for count in counts.values() if count == majority_count) > 1
+    if tied or majority_count <= len(scenes) / 2:
         raise RuntimeError(
-            f"Expected exactly one Planet template for {city} scene {scene_id}, "
-            f"found {len(matches)}."
+            f"No strict majority Planet grid for {city}: "
+            f"group sizes={sorted(counts.values(), reverse=True)}"
         )
-    return matches[0]
+
+    compatible = sorted(path for path in scenes if signatures[path] == majority_signature)
+    outliers = sorted(path for path in scenes if signatures[path] != majority_signature)
+    if requested_scene_id:
+        requested = [
+            path for path in scenes if scene_id_from_planet_tif(path) == requested_scene_id
+        ]
+        if len(requested) != 1:
+            raise RuntimeError(
+                f"Expected one downloaded Planet raster for scene {requested_scene_id}; "
+                f"found {len(requested)}."
+            )
+        if requested[0] not in compatible:
+            raise RuntimeError(
+                f"Requested template scene {requested_scene_id} is not on the majority grid."
+            )
+        template = requested[0]
+    else:
+        template = compatible[0]
+
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    for path in scenes:
+        with rasterio.open(path) as src:
+            rows.append(
+                {
+                    "city_slug": city,
+                    "scene_id": scene_id_from_planet_tif(path),
+                    "raster_path": relative_path(path),
+                    "epsg_code": src.crs.to_epsg() if src.crs else "",
+                    "crs_wkt": src.crs.to_wkt() if src.crs else "",
+                    "transform": ";".join(str(value) for value in tuple(src.transform)),
+                    "width": src.width,
+                    "height": src.height,
+                    "bounds": ";".join(str(value) for value in tuple(src.bounds)),
+                    "pixel_width": abs(src.transform.a),
+                    "pixel_height": abs(src.transform.e),
+                    "grid_group_count": counts[signatures[path]],
+                    "is_majority_grid": signatures[path] == majority_signature,
+                    "is_template": path == template,
+                }
+            )
+    with audit_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    logging.info(
+        "Planet majority grid contains %s/%s scenes; %s outlier(s).",
+        len(compatible),
+        len(scenes),
+        len(outliers),
+    )
+    return template, compatible, outliers
 
 
 def load_manifest_tiles(city: str, lidar_project: str) -> list[Path]:
@@ -296,18 +416,119 @@ def load_manifest_tiles(city: str, lidar_project: str) -> list[Path]:
     return paths
 
 
-def point_crs_from_header(header: Any) -> Any:
-    """Read CRS from a LAS/LAZ header, falling back to common source CRSs."""
+def resolve_lidar_inputs(values: list[str]) -> list[Path]:
+    """Expand explicit files/directories without modifying the source data."""
+    paths: list[Path] = []
+    for value in values:
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        if not candidate.exists():
+            raise FileNotFoundError(f"LiDAR input does not exist: {candidate}")
+        if candidate.is_dir():
+            paths.extend(
+                path
+                for path in sorted(candidate.rglob("*"))
+                if path.is_file() and path.suffix.lower() in {".las", ".laz", ".tif", ".tiff"}
+            )
+        else:
+            paths.append(candidate)
+    unique = sorted(set(path.resolve() for path in paths))
+    if not unique:
+        raise RuntimeError("Explicit LiDAR inputs contained no LAS, LAZ, TIFF, or GeoTIFF files.")
+    return unique
+
+
+def classify_lidar_inputs(paths: list[Path], requested_type: str) -> str:
+    """Determine whether inputs are point clouds or existing nDSM rasters."""
+    point_suffixes = {".las", ".laz"}
+    raster_suffixes = {".tif", ".tiff"}
+    suffixes = {path.suffix.lower() for path in paths}
+    if requested_type == "point_cloud":
+        if not suffixes.issubset(point_suffixes):
+            raise RuntimeError("--lidar-input-type point_cloud received a non-LAS/LAZ file.")
+        return requested_type
+    if requested_type == "ndsm_raster":
+        if not suffixes.issubset(raster_suffixes):
+            raise RuntimeError("--lidar-input-type ndsm_raster received a non-TIFF file.")
+        return requested_type
+    if suffixes.issubset(point_suffixes):
+        return "point_cloud"
+    if suffixes.issubset(raster_suffixes):
+        return "ndsm_raster"
+    raise RuntimeError(
+        "Cannot mix point clouds and nDSM rasters in one city build. Run them separately."
+    )
+
+
+def audit_point_classifications(
+    tile_paths: list[Path],
+    ground_class: int,
+    audit_path: Path,
+) -> dict[int, int]:
+    """Count LAS classes before raster creation and require the chosen ground class."""
+    import laspy
+
+    totals: Counter[int] = Counter()
+    rows: list[dict[str, Any]] = []
+    for path in tile_paths:
+        tile_counts: Counter[int] = Counter()
+        with laspy.open(path) as reader:
+            for points in reader.chunk_iterator(2_000_000):
+                values, counts = np.unique(np.asarray(points.classification), return_counts=True)
+                tile_counts.update({int(value): int(count) for value, count in zip(values, counts)})
+        totals.update(tile_counts)
+        rows.append(
+            {
+                "lidar_path": relative_path(path),
+                "point_count": sum(tile_counts.values()),
+                "ground_class_requested": ground_class,
+                "ground_point_count": tile_counts.get(ground_class, 0),
+                "classification_counts": ";".join(
+                    f"{key}:{value}" for key, value in sorted(tile_counts.items())
+                ),
+            }
+        )
+
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    with audit_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    if totals.get(ground_class, 0) == 0:
+        raise RuntimeError(
+            f"Ground class {ground_class} is absent from all point clouds. "
+            f"Observed classification counts: {dict(sorted(totals.items()))}. "
+            "Inspect the classification audit and rerun with --ground-class only "
+            "after confirming the provider's classification specification."
+        )
+    logging.info(
+        "Classification preflight found %s ground-class-%s points. Counts: %s",
+        totals[ground_class],
+        ground_class,
+        dict(sorted(totals.items())),
+    )
+    return dict(totals)
+
+
+def point_crs_from_header(header: Any, tile_path: Path) -> Any:
+    """Read CRS from a LAS/LAZ header and reject unknown global source CRSs."""
     import pyproj
 
     crs = header.parse_crs()
     if crs is not None:
         return crs
 
-    # NYC Sandy LiDAR tiles have used NAD83(2011) / UTM zone 18N in our prior
-    # runs. LA 2023 tiles usually carry CRS metadata, so this is mainly a NYC
-    # safety fallback.
-    return pyproj.CRS.from_epsg(6347)
+    # These already-validated legacy NYC Sandy files lack embedded CRS metadata.
+    # Do not apply this local exception to other countries or projects.
+    if "NY_New_York_CMGP_SANDY_LiDAR_15" in tile_path.as_posix():
+        logging.warning("Using documented EPSG:6347 fallback for %s", relative_path(tile_path))
+        return pyproj.CRS.from_epsg(6347)
+    raise RuntimeError(
+        f"Point cloud has no embedded CRS: {tile_path}. Supply a CRS-corrected "
+        "source file; the script will not guess a projection."
+    )
 
 
 def point_grid_indices(
@@ -335,6 +556,7 @@ def accumulate_lidar_surfaces(
     transform: Any,
     width: int,
     height: int,
+    ground_class: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Create raw DSM and observed-ground DTM arrays from LAZ point tiles."""
     import laspy
@@ -359,7 +581,7 @@ def accumulate_lidar_surfaces(
     for tile_index, tile_path in enumerate(tile_paths, start=1):
         logging.info("Reading tile %s/%s: %s", tile_index, len(tile_paths), relative_path(tile_path))
         laz = laspy.read(tile_path)
-        point_crs = point_crs_from_header(laz.header)
+        point_crs = point_crs_from_header(laz.header, tile_path)
         key = (point_crs.to_string(), template_crs.to_string())
         if transformer is None or key != transformer_key:
             transformer = pyproj.Transformer.from_crs(point_crs, template_crs, always_xy=True)
@@ -393,7 +615,7 @@ def accumulate_lidar_surfaces(
             withheld = np.zeros(len(z), dtype=bool)
 
         excluded = np.isin(classification, list(EXCLUDED_CLASSES)) | withheld
-        ground = np.isin(classification, list(GROUND_CLASSES)) & ~excluded
+        ground = (classification == ground_class) & ~excluded
         surface = (~ground) & ~excluded
 
         if ground.any():
@@ -417,6 +639,56 @@ def accumulate_lidar_surfaces(
     stats["dsm_observed_pixels"] = int(np.isfinite(dsm).sum())
     stats["dtm_observed_pixels"] = int(observed.sum())
     return dsm, dtm_observed, ground_count, stats
+
+
+def align_ndsm_rasters_to_planet_grid(
+    raster_paths: list[Path],
+    template_path: Path,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Reproject and mosaic existing nDSM rasters onto the Planet template grid."""
+    import rasterio
+    from rasterio.warp import Resampling, reproject
+
+    with rasterio.open(template_path) as template:
+        aligned = np.full((template.height, template.width), np.nan, dtype=np.float32)
+        template_crs = template.crs
+        template_transform = template.transform
+
+    valid_source_pixels = 0
+    for path in raster_paths:
+        with rasterio.open(path) as source:
+            if source.crs is None:
+                raise RuntimeError(f"LiDAR nDSM raster has no CRS: {path}")
+            if source.count != 1:
+                raise RuntimeError(
+                    f"Expected a single-band nDSM raster, found {source.count} bands: {path}"
+                )
+            source_data = source.read(1, masked=True).astype(np.float32)
+            valid_source_pixels += int(source_data.count())
+            destination = np.full(aligned.shape, np.nan, dtype=np.float32)
+            reproject(
+                source=np.ma.filled(source_data, np.nan),
+                destination=destination,
+                src_transform=source.transform,
+                src_crs=source.crs,
+                src_nodata=np.nan,
+                dst_transform=template_transform,
+                dst_crs=template_crs,
+                dst_nodata=np.nan,
+                resampling=Resampling.bilinear,
+            )
+            # Adjacent source tiles normally do not overlap. If they do, retain
+            # the maximum valid height so a lower overlap does not erase a roof.
+            aligned = np.fmax(aligned, destination)
+
+    if not np.isfinite(aligned).any():
+        raise RuntimeError("The nDSM raster inputs do not overlap the Planet majority grid.")
+    aligned = np.where(np.isfinite(aligned), np.maximum(aligned, 0), np.nan).astype(np.float32)
+    return aligned, {
+        "tile_count": len(raster_paths),
+        "source_valid_pixels": valid_source_pixels,
+        "ndsm_valid_pixels": int(np.isfinite(aligned).sum()),
+    }
 
 
 def fill_dtm(dtm_observed: np.ndarray, max_distance_pixels: float) -> np.ndarray:
@@ -915,10 +1187,19 @@ def main() -> None:
     args = parse_args()
 
     city = args.city
-    lidar_project = args.lidar_project or DEFAULT_LIDAR_PROJECT[city]
-    template_scene_id = args.template_scene_id or DEFAULT_TEMPLATE_SCENE_ID[city]
+    lidar_project = args.lidar_project or DEFAULT_LIDAR_PROJECT.get(city)
+    if not lidar_project and not args.lidar_input:
+        raise RuntimeError(
+            "A non-default city requires --lidar-input, or --lidar-project with a "
+            "matching manifest entry."
+        )
+    lidar_project_label = lidar_project or "explicit_lidar_input"
     output_label = output_label_for(city, lidar_project, args.output_label)
-    footprint_path = Path(args.footprints) if args.footprints else DEFAULT_FOOTPRINT_PATH[city]
+    default_footprint = DEFAULT_FOOTPRINT_PATH.get(
+        city,
+        FOOTPRINT_GENERATED_DIR / city / f"{city}_building_footprints_merged_5km.gpkg",
+    )
+    footprint_path = Path(args.footprints) if args.footprints else default_footprint
     if not footprint_path.is_absolute():
         footprint_path = PROJECT_ROOT / footprint_path
 
@@ -931,31 +1212,67 @@ def main() -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{output_label}_lidar_ndsm_planet_aligned.tif"
         summary_path = output_dir / f"{output_label}_lidar_ndsm_planet_aligned_summary.csv"
-        htc_dir = output_dir / "htc_dc_net" / template_scene_id
         if output_path.exists() and not args.overwrite:
             raise FileExistsError(f"Output exists: {output_path}. Pass --overwrite to replace.")
 
-        template_path = find_planet_template(city, template_scene_id)
-        tile_paths = load_manifest_tiles(city, lidar_project)
+        grid_audit_path = output_dir / f"{output_label}_planet_grid_audit.csv"
+        template_path, compatible_scenes, outlier_scenes = select_majority_planet_grid(
+            city=city,
+            requested_scene_id=args.template_scene_id,
+            audit_path=grid_audit_path,
+        )
+        template_scene_id = scene_id_from_planet_tif(template_path)
+        htc_dir = output_dir / "htc_dc_net" / template_scene_id
+
+        if args.lidar_input:
+            lidar_paths = resolve_lidar_inputs(args.lidar_input)
+        else:
+            if lidar_project is None:
+                raise RuntimeError("Internal error: missing LiDAR project.")
+            lidar_paths = load_manifest_tiles(city, lidar_project)
+        lidar_input_type = classify_lidar_inputs(lidar_paths, args.lidar_input_type)
 
         logging.info("Using Planet template: %s", relative_path(template_path))
-        logging.info("Using %s LiDAR tiles from %s.", len(tile_paths), lidar_project)
+        logging.info(
+            "Using %s LiDAR input(s) of type %s from %s.",
+            len(lidar_paths),
+            lidar_input_type,
+            lidar_project_label,
+        )
         logging.info("Using footprints: %s", relative_path(footprint_path))
 
-        with rasterio.open(template_path) as template:
-            dsm, dtm_observed, ground_count, stats = accumulate_lidar_surfaces(
-                tile_paths=tile_paths,
-                template_crs=template.crs,
-                transform=template.transform,
-                width=template.width,
-                height=template.height,
+        classification_counts: dict[int, int] = {}
+        if lidar_input_type == "point_cloud":
+            classification_audit_path = (
+                output_dir / f"{output_label}_lidar_classification_audit.csv"
             )
+            classification_counts = audit_point_classifications(
+                tile_paths=lidar_paths,
+                ground_class=args.ground_class,
+                audit_path=classification_audit_path,
+            )
+            with rasterio.open(template_path) as template:
+                dsm, dtm_observed, ground_count, stats = accumulate_lidar_surfaces(
+                    tile_paths=lidar_paths,
+                    template_crs=template.crs,
+                    transform=template.transform,
+                    width=template.width,
+                    height=template.height,
+                    ground_class=args.ground_class,
+                )
 
-        logging.info("Filling DTM gaps.")
-        dtm_filled = fill_dtm(dtm_observed, args.ground_fill_distance_pixels)
-
-        ndsm = dsm - dtm_filled
-        ndsm = np.where(np.isfinite(ndsm), np.maximum(ndsm, 0), np.nan).astype(np.float32)
+            logging.info("Filling DTM gaps.")
+            dtm_filled = fill_dtm(dtm_observed, args.ground_fill_distance_pixels)
+            ndsm = dsm - dtm_filled
+            ndsm = np.where(np.isfinite(ndsm), np.maximum(ndsm, 0), np.nan).astype(np.float32)
+        else:
+            ndsm, stats = align_ndsm_rasters_to_planet_grid(lidar_paths, template_path)
+            # An existing nDSM has already had terrain removed. Keep unavailable
+            # intermediate surfaces explicitly nodata instead of fabricating them.
+            dsm = np.full(ndsm.shape, np.nan, dtype=np.float32)
+            dtm_observed = np.full(ndsm.shape, np.nan, dtype=np.float32)
+            dtm_filled = np.full(ndsm.shape, np.nan, dtype=np.float32)
+            ground_count = np.zeros(ndsm.shape, dtype=np.uint32)
 
         logging.info("Rasterizing building mask.")
         building_mask = rasterize_building_mask(
@@ -977,7 +1294,9 @@ def main() -> None:
         common_tags = {
             "city": city,
             "output_label": output_label,
-            "lidar_project": lidar_project,
+            "lidar_project": lidar_project_label,
+            "lidar_input_type": lidar_input_type,
+            "lidar_input_count": str(len(lidar_paths)),
             "template_raster": relative_path(template_path),
             "building_footprints": relative_path(footprint_path),
             "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -997,7 +1316,10 @@ def main() -> None:
             ),
             tags=common_tags,
         )
-        verify_output(template_path, output_path)
+        # The nDSM must align with every scene in the majority group, not only
+        # with the one file chosen as the deterministic writing template.
+        for compatible_scene in compatible_scenes:
+            verify_output(compatible_scene, output_path)
 
         htc_summary: dict[str, Any] = {}
         if not args.no_htc_files:
@@ -1050,7 +1372,20 @@ def main() -> None:
                 "height": template.height,
                 "resolution_x_m": abs(template.transform.a),
                 "resolution_y_m": abs(template.transform.e),
-                "lidar_project_used": lidar_project,
+                "lidar_project_used": lidar_project_label,
+                "lidar_input_type": lidar_input_type,
+                "lidar_input_count": len(lidar_paths),
+                "lidar_input_paths": ";".join(relative_path(path) for path in lidar_paths),
+                "ground_class_used": args.ground_class if lidar_input_type == "point_cloud" else "",
+                "classification_counts": (
+                    ";".join(f"{key}:{value}" for key, value in sorted(classification_counts.items()))
+                    if classification_counts
+                    else ""
+                ),
+                "planet_scene_count": len(compatible_scenes) + len(outlier_scenes),
+                "planet_majority_grid_scene_count": len(compatible_scenes),
+                "planet_outlier_grid_scene_count": len(outlier_scenes),
+                "planet_grid_audit": relative_path(grid_audit_path),
                 "footprints": relative_path(footprint_path),
                 "ground_fill_distance_pixels": args.ground_fill_distance_pixels,
                 "ground_fill_distance_m": args.ground_fill_distance_pixels * abs(template.transform.a),

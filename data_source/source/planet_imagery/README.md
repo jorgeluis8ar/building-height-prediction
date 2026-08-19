@@ -259,6 +259,39 @@ shortfall file only when fewer than eight total compatible scenes were found.
 The script performs selection and asset-list metadata checks only. It does not
 activate, order, or download Planet imagery or LiDAR.
 
+### Order the 94 training/open-LiDAR cities without downloading
+
+The existing training order script also accepts the authoritative 94-city,
+eight-scenes-per-city selection. Always create and inspect the local manifest
+first with `--dry-run`; this performs no authentication and creates no Planet
+orders. The explicit 94-city arguments prevent accidental use of the older
+711-city input and keep the resulting order state in a separate manifest.
+
+```cmd
+python data_source\source\planet_imagery\order_planet_training_city_scenes.py ^
+  --selected-scenes data_source\data\planet_imagery\generated\training_lidar_year_scene_selection\selected_training_lidar_city_planet_scenes.csv ^
+  --city-inventory data_source\data\height_labels\generated\training_open_lidar\training_cities_with_open_lidar.csv ^
+  --expected-city-count 94 ^
+  --expected-scenes-per-city 8 ^
+  --split-seed 419453 ^
+  --order-name-prefix bhp_train_lidar ^
+  --manifest data_source\data\planet_imagery\generated\training_lidar_orders\planet_training_lidar_city_orders_manifest.csv ^
+  --download-root data_source\data\planet_imagery\source\training_lidar_94 ^
+  --dry-run
+```
+
+After confirming that the manifest reports 94 orders and 752 scenes, submit
+the orders in bounded batches. This command creates/recover orders but never
+downloads their results:
+
+```cmd
+for /L %O in (0,10,90) do python data_source\source\planet_imagery\order_planet_training_city_scenes.py --selected-scenes data_source\data\planet_imagery\generated\training_lidar_year_scene_selection\selected_training_lidar_city_planet_scenes.csv --city-inventory data_source\data\height_labels\generated\training_open_lidar\training_cities_with_open_lidar.csv --expected-city-count 94 --expected-scenes-per-city 8 --split-seed 419453 --order-name-prefix bhp_train_lidar --manifest data_source\data\planet_imagery\generated\training_lidar_orders\planet_training_lidar_city_orders_manifest.csv --download-root data_source\data\planet_imagery\source\training_lidar_94 --confirm-order --city-offset %O --city-limit 10 --request-pause 2
+```
+
+The final loop iteration starts at offset 90 and submits only the remaining
+four cities. If the command is placed in a `.bat` file, replace `%O` with
+`%%O`. Do not invoke a download script during this stage.
+
 ## Scripts
 
 Search metadata only:
