@@ -783,6 +783,16 @@ Last updated: 2026-08-12
   with exact 4/4 solstice-season and 2/2/2/2 cardinal-direction balance; asset
   checks were deliberately skipped for this no-API test and remain required
   for production output.
+- Revised the LiDAR selector's final unit from eight scenes per acquisition
+  year to eight scenes total per city. The deterministic hierarchy now uses
+  documented acquisition-year scenes first, nearest post-LiDAR scenes second,
+  and only then flagged pre-LiDAR or non-solstice standard-quality fallbacks.
+  The complete offline regression selected exactly 752 unique scenes: eight
+  for every one of 94 cities, with an empty true-shortfall table. Of these,
+  452 are from documented acquisition years, 292 are post-LiDAR, eight are
+  flagged pre-LiDAR fallbacks for Newport, and three are flagged non-solstice
+  fallbacks for Miami. Live RGB+NIR asset verification remains required before
+  treating the production output as order-compatible.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
