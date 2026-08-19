@@ -715,6 +715,64 @@ Last updated: 2026-08-12
 
 ## Remaining
 
+- Expanded the global open-LiDAR screening inventory with a metadata-only
+  17-country audit covering 249 WUP cities. The cross-platform script
+  `query_named_country_open_lidar_availability.py` reuses the completed USGS
+  results, performs official ArcGIS footprint-union queries for Canada and
+  Ireland, validates representative file endpoints where exposed, and checks
+  official national portals without downloading LiDAR, DSM, or DTM payloads.
+  All 249 city records and all 249 portal/file checks completed successfully.
+  Results are 206 `ready_for_download`, 26 `incomplete`, 14
+  `manual_portal_check_required`, and 3 `registration_required`. The 26
+  incomplete cities comprise 19 U.S. and 7 Canadian AOIs below 99% measured
+  coverage; Australia's 11 cities, Glasgow, Edinburgh, and Belfast require
+  interactive portal checks; Sweden's 3 cities require current STAC
+  authorization/terms acceptance. The rebuilt 1,862-city global inventory now
+  contains 206 ready, 26 incomplete, 14 manual-portal, 3 registration-required,
+  23 query-required, and 1,590 not-yet-checked records.
+- Completed a metadata-only USGS 3DEP audit for all 144 U.S. WUP cities with
+  `query_usgs_3dep_global_city_availability.py`. All 144 API calls succeeded
+  and returned downloadable LAZ metadata: 125 cities have at least 99% coverage
+  of the circular 5 km AOI and are `ready_for_download`; 19 cities are below
+  99% and are `incomplete`. No city returned `not_found` or `query_failed`. The
+  audit recorded 25,323 AOI-intersecting tile records and download URLs. A
+  representative URL for every city responded to a one-byte range request
+  with HTTP 206; no LiDAR file bodies were saved. The global inventory builder
+  now incorporates these results.
+- Updated the requested U.S. readiness rule: cities with at least 99% of their
+  5 km AOI covered by returned USGS LPC tile footprints are labeled
+  `ready_for_download`; cities below 99% are labeled `incomplete`. The full
+  144-city U.S. audit is rerun under this common rule so the six original pilot
+  cities and the expanded city pool use the same coverage calculation.
+- Added `select_training_cities_with_open_lidar.py`, a local and reproducible
+  join between the 206 `ready_for_download` LiDAR cities and the 711-city
+  PlanetScope training split. Matching by stable `city_slug` identifies 94
+  training cities with ready LiDAR sources. The script writes a detailed city
+  table and country summary without querying or downloading remote data.
+- Added `add_training_lidar_acquisition_years.py` and enriched all 94 rows in
+  the detailed training/open-LiDAR city table with city-specific acquisition
+  years, start/end dates, precision, official metadata source, and explanatory
+  notes. Exact official work-unit, project, or tile metadata is available for
+  72 cities; the remaining rows retain the narrowest documented official city,
+  flight-lot, regional, or campaign period instead of inventing a single year.
+  The run used metadata indexes only and downloaded no LiDAR or imagery data.
+- Added `select_planet_scenes_for_training_lidar_years.py`, a separate and
+  resumable selector that targets eight PlanetScope scenes for each defensible
+  LiDAR acquisition year among the 94 training/open-LiDAR cities. It retains
+  all established scene-quality filters, changes the target to four scenes per
+  solstice season and two per cardinal direction within each city-year, and
+  writes combined, per-city-year, eligibility, summary, and shortfall CSVs.
+  Exact and endpoint-range years are processed from 2016 onward; pre-2016 and
+  broad unresolved ranges are reported rather than silently substituted or
+  expanded. Syntax, CLI, and the no-network exclusion path passed locally;
+  production selection awaits the 94-city Planet metadata held on Windows.
+- Added `combine_planet_global_city_scene_metadata.py`, an API-free streaming
+  combiner for the 1,862 per-city Planet query files. It validates the complete
+  expected file set and every city/scene key, preserves a union of metadata
+  columns, adds source-file provenance, and writes the combined CSV atomically.
+  A partial one-city test combined all 186 Aba rows successfully; the complete
+  run awaits the full per-city metadata directory on Windows.
+
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
 - Harmonize AOI-selected building-footprint attributes into the common

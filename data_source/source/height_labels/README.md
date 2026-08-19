@@ -5,9 +5,112 @@ height-label sources. Raw downloaded data belong under
 `data_source/data/height_labels/source/<city_slug>/`; lightweight manifests and
 derived outputs belong under `data_source/data/height_labels/generated/`.
 
+## Global Open-LiDAR City Inventory
+
+`build_global_open_lidar_city_inventory.py` creates an auditable first-pass
+screening table for all 1,862 WUP cities. Run it from any directory with:
+
+```bash
+python data_source/source/height_labels/build_global_open_lidar_city_inventory.py
+```
+
+It writes:
+
+```text
+data_source/data/height_labels/generated/global_open_lidar_city_inventory.csv
+data_source/data/height_labels/generated/global_open_lidar_city_inventory_summary.csv
+```
+
+The inventory uses `confirmed` only when nationwide official documentation or
+an existing city-level USGS project manifest establishes downloadable LiDAR.
+`query_required` means that a promising official program exists but its
+coverage must still be intersected with the city's 5 km AOI. `not_checked`
+means that no authoritative source has yet been evaluated; it does **not** mean
+that open LiDAR is unavailable. `partial`, `not_found`, and `query_failed` are
+reserved for later AOI-query results.
+
+The first-pass registry covers AHN (Netherlands), the National Land Survey of
+Finland, PNOA-LiDAR (Spain), IGN LiDAR HD (France), LINZ (New Zealand), and
+USGS 3DEP. Existing USGS results for the six pilot cities are incorporated
+from `usgs_3dep_projects.csv`. The remaining U.S. cities require a generalized
+metadata-only version of the USGS downloader before their status can be
+confirmed.
+
+`query_usgs_3dep_global_city_availability.py` performs that metadata-only U.S.
+audit. It queries National Map LPC records, intersects tile bounding boxes with
+each WUP 5 km AOI, and requests only byte zero from one representative URL per
+city. It does not save LAZ content. Its outputs are:
+
+```text
+data_source/data/height_labels/generated/usgs_3dep_global_city_availability.csv
+data_source/data/height_labels/generated/usgs_3dep_global_city_tile_metadata.csv
+data_source/data/height_labels/generated/logs/query_usgs_3dep_global_city_availability_<timestamp>.log
+```
+
+Run the common metadata audit for all 144 U.S. cities with:
+
+```bash
+python data_source/source/height_labels/query_usgs_3dep_global_city_availability.py
+```
+
+For U.S. cities, coverage is `ready_for_download` at 99% or more,
+`incomplete` below 99% when one or more intersecting files exist, and
+`not_found` when the API returns no
+intersecting files. Any request or processing error is retained as
+`query_failed`, and the program exits nonzero after writing the honest results.
+
 The proposed process for converting classified point clouds into defensible
 building-level roof-to-ground heights is documented in
 `LIDAR_BUILDING_HEIGHT_PROCESS.md`.
+
+## Named-Country Open-LiDAR Audit
+
+`query_named_country_open_lidar_availability.py` performs a metadata-only
+audit for the 249 WUP cities in the United States, Spain, Netherlands,
+Finland, Denmark, Norway, Sweden, Switzerland, Belgium, Poland, United
+Kingdom, Ireland, Estonia, Latvia, Lithuania, Australia, and Canada. It never
+downloads a LiDAR, DSM, or DTM payload.
+
+The script reuses the completed USGS audit, calculates 5 km AOI coverage from
+official ArcGIS footprint catalogs for Canada and Ireland, checks official
+portal reachability for documented nationwide programs, and retains
+interactive or authorization-gated systems as explicit follow-up statuses.
+Run it from any directory with:
+
+```bash
+python data_source/source/height_labels/query_named_country_open_lidar_availability.py
+```
+
+It writes:
+
+```text
+data_source/data/height_labels/generated/named_country_open_lidar_city_audit.csv
+data_source/data/height_labels/generated/named_country_open_lidar_source_registry.csv
+data_source/data/height_labels/generated/logs/query_named_country_open_lidar_<timestamp>.log
+```
+
+The common readiness rule is `ready_for_download` at 99% or more measured AOI
+coverage, and `incomplete` below 99%. `manual_portal_check_required` and
+`registration_required` record unresolved access mechanisms; neither means
+that data are unavailable. After the named-country audit, rerun
+`build_global_open_lidar_city_inventory.py` to merge the detailed records into
+the 1,862-city inventory.
+
+`select_training_cities_with_open_lidar.py` locally joins that global inventory
+to the PlanetScope city split using the stable `city_slug`. It selects only
+`ready_for_download` LiDAR cities assigned to `training`, validates the expected
+206-city and 711-city source pools, and does not make network requests or
+download data. Run it with:
+
+```bash
+python data_source/source/height_labels/select_training_cities_with_open_lidar.py
+```
+
+It writes the city-level overlap and a country summary under:
+
+```text
+data_source/data/height_labels/generated/training_open_lidar/
+```
 
 ## Python Environment
 
@@ -832,3 +935,25 @@ height rasters above because they represent continuous LiDAR surfaces and use
 the expected `_IMG.tif`, `_BLG.tif`, and `_AGL.tif` file naming. They are still
 not a drop-in guarantee for training without checking the exact local HTC
 configuration, but they provide the required raster ingredients and split files.
+
+## Training-city LiDAR acquisition dates
+
+Run the metadata-only acquisition-date enrichment after regenerating the
+94-city training/open-LiDAR join:
+
+```text
+python data_source/source/height_labels/add_training_lidar_acquisition_years.py
+```
+
+The program updates
+`data_source/data/height_labels/generated/training_open_lidar/training_cities_with_open_lidar.csv`
+atomically. It replaces the former broad `lidar_acquisition_year` placeholder
+and adds `lidar_acquisition_years`, start and end dates, metadata precision,
+official source, and notes. Multiple years are retained with semicolon
+separators when several official projects or flights intersect one AOI. A
+hyphenated year range means the official source exposes only a campaign or
+flight-lot interval; it must not be interpreted as one exact flight year.
+
+The script reads exact metadata from the USGS 3DEP, CanElevation, and England
+Environment Agency indexes. Other rows use documented official national,
+regional, city, or flight-lot periods. It downloads no LiDAR or imagery data.
