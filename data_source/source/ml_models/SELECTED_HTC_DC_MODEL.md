@@ -148,6 +148,21 @@ Transfer these items outside GitHub while preserving their relative paths:
 After transfer, verify that the checkpoint, dataset, channel count, channel
 order, image statistics, CRS, transform, and pixel resolution match this file.
 
+### Portable Inference Bundle
+
+`create_selected_model_inference_bundle.py` packages the selected epoch-50
+checkpoint, exact RGB+NIR normalization statistics, model configuration,
+manifest, Windows CPU requirements, and GeoTIFF predictor under:
+
+```text
+data_source/data/ml_models/generated/htc_dc_net/selected_model_inference_bundle_v1/
+```
+
+The bundle is generated data and is not committed to Git because the checkpoint
+is approximately 200 MB. Transfer the complete bundle between computers using
+Dropbox or another approved large-file channel. The destination computer still
+needs the repository's tracked `external/HTC-DC-Net` model source.
+
 ### Option B: Rebuild And Retrain
 
 First create the off-nadir RGB base dataset and then build the RGB+NIR variant:

@@ -375,7 +375,18 @@ class UBins(BaseHeightPredictor):
         if self.backbone_name.startswith("efficientnetb"):
             ind = self.backbone_name[-1]
             basemodel_name = 'tf_efficientnet_b'+ind+'_ap'
-            if os.path.exists('rwightman_gen-efficientnet-pytorch_master'):
+            pretrained_backbone = bool(cfgs.get("pretrained_backbone", True))
+            efficientnet_repo_dir = cfgs.get("efficientnet_repo_dir")
+            if efficientnet_repo_dir and os.path.exists(efficientnet_repo_dir):
+                # Portable inference bundles include the exact historical
+                # Torch Hub source used when the checkpoint was trained.
+                basemodel = torch.hub.load(
+                    efficientnet_repo_dir,
+                    basemodel_name,
+                    source='local',
+                    pretrained=pretrained_backbone,
+                )
+            elif os.path.exists('rwightman_gen-efficientnet-pytorch_master'):
                 basemodel = torch.hub.load('rwightman_gen-efficientnet-pytorch_master', basemodel_name, source='local', pretrained=True)
             else:
                 basemodel = torch.hub.load(
