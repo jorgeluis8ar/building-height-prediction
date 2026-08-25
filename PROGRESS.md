@@ -816,6 +816,19 @@ Last updated: 2026-08-19
   names, and write a separate resumable manifest. An API-free in-memory test
   reconciled exactly 94 city orders and 752 unique city-scene rows. No Planet
   order was submitted and no imagery was downloaded during development.
+- Added `run_us_lidar_to_planet_ndsm.py`, a US-only sequential and resumable
+  workflow for the 54 USGS-backed training cities. It plans the latest
+  qualifying acquisition, audits the strict-majority Planet grid, downloads
+  only manifest-listed AOI tiles, confirms the point classification before
+  using ground class 2, and writes one validated three-band Planet-aligned
+  nDSM. Optional raw-LiDAR cleanup is gated behind an explicit flag and occurs
+  only after validation; Planet imagery, failed downloads, manifests, audits,
+  logs, and outputs are never deleted. API-free input validation confirmed 54
+  cities, 9,997 candidate tile records, and eight selected scenes per city. A
+  live metadata-only test found the USGS spatial attribute query unavailable,
+  so the script records an explicit official-publication-date fallback instead
+  of silently treating it as exact project collection metadata. No LiDAR data
+  was downloaded during implementation or testing.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
