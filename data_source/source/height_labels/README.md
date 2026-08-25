@@ -1013,3 +1013,69 @@ writes detailed per-scene and city-summary CSVs under
 The audit compares EPSG/WKT, pixel size, dimensions, bounds, affine transform,
 bands, data type, and NoData. Matching CRS alone is not treated as proof of
 matching pixel grids.
+
+## US training LiDAR to Planet-aligned nDSM
+
+`run_us_lidar_to_planet_ndsm.py` is the US-only, resumable orchestrator for the
+54 training cities backed by USGS 3DEP. It processes cities sequentially and
+uses the latest qualifying LiDAR project that covers at least 99% of the AOI.
+It prefers official project collection dates. If the USGS collection-index
+attribute query is unavailable, the run logs and manifest explicitly record a
+fallback that ranks projects by their official product publication dates and
+uses the city's previously verified latest acquisition date. Selected Planet
+scenes acquired during or after that date are preferred; any earlier selected
+scene is counted and flagged in the manifest.
+
+For each city, the program:
+
+1. identifies the latest qualifying USGS project or project set;
+2. validates the eight selected and downloaded Planet analytic SR rasters;
+3. chooses the strict-majority complete Planet grid and records outliers;
+4. downloads only AOI-intersecting LAZ tiles, with free-space checks;
+5. verifies the point classifications and requires ground class 2 by default;
+6. rasterizes DSM and DTM directly on the Planet grid and derives nDSM;
+7. writes and validates one three-band GeoTIFF; and
+8. checkpoints the city manifest before any optional cleanup.
+
+The final raster bands are:
+
+1. continuous nDSM in metres;
+2. building-footprint-masked nDSM in metres; and
+3. QA code (`0=invalid`, `1=valid outside buildings`, `2=valid in building`).
+
+On Windows CMD, first validate one city without downloading LiDAR:
+
+```cmd
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe data_source\source\height_labels\run_us_lidar_to_planet_ndsm.py ^
+  --dry-run ^
+  --city-slug boston_22939
+```
+
+After checking its plan, process that city and retain its raw LAZ files:
+
+```cmd
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe data_source\source\height_labels\run_us_lidar_to_planet_ndsm.py ^
+  --confirm-download ^
+  --city-slug boston_22939 ^
+  --minimum-free-gb 100
+```
+
+Only after the retained-file run and its output have been inspected, add
+`--confirm-delete-lidar` to allow cleanup. For the complete 54-city run, use
+`--city-offset 0 --city-limit 0`. Do not run concurrent copies of the program.
+
+The deletion rules are strict:
+
+- Planet imagery is never deleted.
+- Incomplete or failed LiDAR downloads are never deleted.
+- LiDAR is never deleted after rasterization or validation failure.
+- Only LAZ files named in that city's exact download manifest may be deleted.
+- Deletion requires the explicit `--confirm-delete-lidar` option.
+- The final nDSM, run manifest, tile manifest, classification audit, and logs
+  are always preserved.
+
+Outputs are stored under
+`data_source/data/height_labels/generated/us_training_planet_ndsm/`. Raw LAZ
+files are staged under
+`data_source/data/height_labels/source/us_training_54/<city_slug>/` and may be
+removed only under the rules above.
