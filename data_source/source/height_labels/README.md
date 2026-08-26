@@ -1057,8 +1057,23 @@ After checking its plan, process that city and retain its raw LAZ files:
 data_source\source\height_labels\venv_height_labels\Scripts\python.exe data_source\source\height_labels\run_us_lidar_to_planet_ndsm.py ^
   --confirm-download ^
   --city-slug boston_22939 ^
+  --download-workers 8 ^
   --minimum-free-gb 100
 ```
+
+`--download-workers` accepts any positive integer and applies only to
+independent LAZ transfers within the current city. The effective worker count
+cannot exceed that city's tile count. The default remains one. Each transfer
+prints its tile number, attempt, resumable byte offset, and completed size.
+Timed-out transfers retry five times by default, preserve their `.partial`
+files, use HTTP byte ranges when the server supports them, and use a 900-second
+socket timeout. Override these safeguards with `--download-retries` and
+`--download-timeout-seconds` only when necessary.
+
+Classification auditing, rasterization, output validation, manifest updates,
+and deletion remain sequential. One process owns the manifests, so do not
+launch concurrent copies of the program even when `--download-workers` is
+greater than one.
 
 Only after the retained-file run and its output have been inspected, add
 `--confirm-delete-lidar` to allow cleanup. For the complete 54-city run, use

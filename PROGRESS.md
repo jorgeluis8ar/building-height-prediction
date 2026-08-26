@@ -829,6 +829,13 @@ Last updated: 2026-08-19
   so the script records an explicit official-publication-date fallback instead
   of silently treating it as exact project collection metadata. No LiDAR data
   was downloaded during implementation or testing.
+- Extended the US LiDAR orchestrator with configurable parallel tile transfers
+  through `--download-workers`. A single coordinator still owns manifests and
+  all CPU/memory-intensive raster stages remain sequential. Transfers now
+  report per-tile progress, retry transient failures with exponential delays,
+  use a 15-minute socket timeout, and preserve/resume `.partial` files through
+  HTTP Range requests when supported. The default remains one worker; Windows
+  runs may request eight without launching unsafe concurrent script processes.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
