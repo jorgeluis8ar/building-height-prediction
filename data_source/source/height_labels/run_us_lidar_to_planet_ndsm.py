@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from datetime import datetime, timezone
 import hashlib
@@ -37,6 +38,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import threading
 import time
 from typing import Any
 import urllib.error
@@ -112,6 +114,8 @@ ELEVATION_INDEX_URL = (
 USER_AGENT = "building-height-prediction/1.0 US-training-nDSM"
 MINIMUM_COVERAGE_PERCENT = 99.0
 DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+DEFAULT_DOWNLOAD_RETRIES = 5
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 900
 NODATA_VALUE = -9999.0
 
 MANIFEST_COLUMNS = [
@@ -135,16 +139,19 @@ class StreamTee:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.terminal = terminal
         self.file = path.open("w", encoding="utf-8")
+        self.lock = threading.Lock()
 
     def write(self, message: str) -> int:
-        self.terminal.write(message)
-        self.file.write(message)
-        self.file.flush()
+        with self.lock:
+            self.terminal.write(message)
+            self.file.write(message)
+            self.file.flush()
         return len(message)
 
     def flush(self) -> None:
-        self.terminal.flush()
-        self.file.flush()
+        with self.lock:
+            self.terminal.flush()
+            self.file.flush()
 
     def close(self) -> None:
         if not self.file.closed:
@@ -185,6 +192,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--city-offset", type=int, default=0)
     parser.add_argument("--city-limit", type=int, default=1)
     parser.add_argument("--minimum-free-gb", type=float, default=100.0)
+    parser.add_argument(
+        "--download-workers",
+        type=int,
+        default=1,
+        help="Number of concurrent LAZ downloads within one city (default: 1).",
+    )
+    parser.add_argument(
+        "--download-retries",
+        type=int,
+        default=DEFAULT_DOWNLOAD_RETRIES,
+        help="Attempts per tile while preserving resumable partial data (default: 5).",
+    )
+    parser.add_argument(
+        "--download-timeout-seconds",
+        type=int,
+        default=DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
+        help="Socket read timeout for each download attempt (default: 900).",
+    )
     parser.add_argument("--ground-class", type=int, default=2)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -464,41 +489,144 @@ def write_tile_manifest(city_slug: str, rows: pd.DataFrame) -> Path:
     return path
 
 
-def download_tiles(city_slug: str, rows: pd.DataFrame, minimum_free_gb: float) -> tuple[list[Path], int]:
-    """Download planned files sequentially and atomically for one city."""
-    paths, total_bytes = [], 0
-    for row in rows.itertuples():
-        filename = Path(urllib.parse.urlparse(str(row.download_url)).path).name
-        if not filename.lower().endswith((".las", ".laz")):
-            raise RuntimeError(f"Unexpected USGS point-cloud filename: {filename}")
-        path = LIDAR_SOURCE_ROOT / city_slug / str(row.project_directory) / filename
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_file() and path.stat().st_size > 0:
-            paths.append(path)
-            total_bytes += path.stat().st_size
-            continue
+def download_one_tile(
+    city_slug: str,
+    row: Any,
+    tile_number: int,
+    tile_total: int,
+    minimum_free_gb: float,
+    retries: int,
+    timeout_seconds: int,
+) -> tuple[int, Path, int, str]:
+    """Download or resume one tile without writing any shared manifest."""
+    filename = Path(urllib.parse.urlparse(str(row.download_url)).path).name
+    if not filename.lower().endswith((".las", ".laz")):
+        raise RuntimeError(f"Unexpected USGS point-cloud filename: {filename}")
+    path = LIDAR_SOURCE_ROOT / city_slug / str(row.project_directory) / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.stat().st_size > 0:
+        print(
+            f"    tile {tile_number}/{tile_total}: existing {filename} "
+            f"({path.stat().st_size / 1e6:.1f} MB)",
+            flush=True,
+        )
+        return tile_number, path, path.stat().st_size, "existing"
+
+    partial = path.with_suffix(path.suffix + ".partial")
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
         free_gb = shutil.disk_usage(path.parent).free / 1e9
         if free_gb < minimum_free_gb:
             raise OSError(f"Free disk {free_gb:.2f} GB is below {minimum_free_gb:.2f} GB")
-        partial = path.with_suffix(path.suffix + ".partial")
-        request = urllib.request.Request(str(row.download_url), headers={"User-Agent": USER_AGENT})
+        offset = partial.stat().st_size if partial.is_file() else 0
+        headers = {"User-Agent": USER_AGENT}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        request = urllib.request.Request(str(row.download_url), headers=headers)
+        print(
+            f"    tile {tile_number}/{tile_total}: {filename}, attempt {attempt}/{retries}, "
+            f"resume={offset / 1e6:.1f} MB",
+            flush=True,
+        )
         try:
-            with urllib.request.urlopen(request, timeout=300) as response, partial.open("wb") as file:
-                while True:
-                    chunk = response.read(DOWNLOAD_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    file.write(chunk)
-            if partial.stat().st_size == 0:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                status = getattr(response, "status", response.getcode())
+                resume_accepted = offset > 0 and status == 206
+                mode = "ab" if resume_accepted else "wb"
+                starting_size = offset if resume_accepted else 0
+                content_length = response.headers.get("Content-Length")
+                expected_size = (
+                    starting_size + int(content_length) if content_length else None
+                )
+                with partial.open(mode) as file:
+                    while True:
+                        chunk = response.read(DOWNLOAD_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        file.write(chunk)
+            actual_size = partial.stat().st_size if partial.is_file() else 0
+            if actual_size == 0:
                 raise IOError(f"Empty USGS download: {row.download_url}")
+            if expected_size is not None and actual_size != expected_size:
+                raise IOError(
+                    f"Incomplete tile {filename}: expected {expected_size} bytes, "
+                    f"received {actual_size}"
+                )
             partial.replace(path)
-        except Exception:
-            if partial.exists():
+            print(
+                f"    tile {tile_number}/{tile_total}: complete {filename} "
+                f"({actual_size / 1e6:.1f} MB)",
+                flush=True,
+            )
+            return tile_number, path, actual_size, "downloaded"
+        except urllib.error.HTTPError as error:
+            last_error = error
+            # A stale partial can cause Range Not Satisfiable. Restart that
+            # tile on the next attempt rather than looping on the same offset.
+            if error.code == 416 and partial.exists():
                 partial.unlink()
-            raise
-        paths.append(path)
-        total_bytes += path.stat().st_size
-    return paths, total_bytes
+        except Exception as error:
+            last_error = error
+        if attempt < retries:
+            delay = min(60, 5 * (2 ** (attempt - 1)))
+            print(
+                f"    tile {tile_number}/{tile_total}: retrying in {delay}s after "
+                f"{type(last_error).__name__}: {last_error}",
+                flush=True,
+            )
+            time.sleep(delay)
+    raise RuntimeError(
+        f"Tile {tile_number}/{tile_total} failed after {retries} attempts; "
+        f"partial file retained at {relative(partial)}; last error: {last_error}"
+    )
+
+
+def download_tiles(
+    city_slug: str,
+    rows: pd.DataFrame,
+    minimum_free_gb: float,
+    workers: int,
+    retries: int,
+    timeout_seconds: int,
+) -> tuple[list[Path], int]:
+    """Download tiles concurrently while one coordinator owns shared state."""
+    row_values = list(rows.itertuples())
+    worker_count = min(workers, len(row_values))
+    print(
+        f"  Stage 2/6: downloading {len(row_values)} LiDAR tiles with "
+        f"{worker_count} worker(s)",
+        flush=True,
+    )
+    results: dict[int, tuple[Path, int]] = {}
+    failures: list[str] = []
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                download_one_tile,
+                city_slug,
+                row,
+                number,
+                len(row_values),
+                minimum_free_gb,
+                retries,
+                timeout_seconds,
+            ): number
+            for number, row in enumerate(row_values, start=1)
+        }
+        for future in as_completed(futures):
+            number = futures[future]
+            try:
+                _, path, size, _ = future.result()
+                results[number] = (path, size)
+            except Exception as error:
+                failures.append(f"tile {number}: {type(error).__name__}: {error}")
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(row_values)} LiDAR tiles failed: "
+            + " | ".join(failures)
+        )
+    ordered = [results[number] for number in range(1, len(row_values) + 1)]
+    return [item[0] for item in ordered], sum(item[1] for item in ordered)
 
 
 def load_builder_module() -> Any:
@@ -622,6 +750,12 @@ def main() -> None:
         raise ValueError("--confirm-delete-lidar requires --confirm-download")
     if args.city_offset < 0 or args.city_limit < 0 or args.minimum_free_gb < 0:
         raise ValueError("Offsets, limits, and storage threshold must be nonnegative")
+    if args.download_workers < 1:
+        raise ValueError("--download-workers must be at least 1")
+    if args.download_retries < 1:
+        raise ValueError("--download-retries must be at least 1")
+    if args.download_timeout_seconds < 1:
+        raise ValueError("--download-timeout-seconds must be at least 1")
     inventory, tiles, scenes = load_inputs()
     if args.city_slugs:
         unknown = sorted(set(args.city_slugs) - set(inventory["city_slug"]))
@@ -672,6 +806,7 @@ def main() -> None:
         record = {column: "" for column in MANIFEST_COLUMNS}
         record.update({"city_slug": slug, "city_name": city.city_name, "last_checked_utc": utc_now()})
         try:
+            print("  Stage 1/6: validating AOI, LiDAR plan, footprints, and Planet grid", flush=True)
             aoi = load_aoi(str(city.aoi_path))
             city_tiles = tiles[tiles["city_slug"] == slug].copy()
             if city_tiles.empty:
@@ -720,9 +855,18 @@ def main() -> None:
             record["lidar_tile_manifest_path"] = relative(tile_manifest)
             checkpoint(records)
             if args.dry_run:
+                print("  Dry run complete: plan and local prerequisites validated", flush=True)
                 continue
 
-            lidar_paths, downloaded_bytes = download_tiles(slug, selected, args.minimum_free_gb)
+            lidar_paths, downloaded_bytes = download_tiles(
+                slug,
+                selected,
+                args.minimum_free_gb,
+                args.download_workers,
+                args.download_retries,
+                args.download_timeout_seconds,
+            )
+            print("  Stage 3/6: hashing downloaded tiles and checkpointing manifest", flush=True)
             tile_manifest = write_tile_manifest(slug, selected)
             record.update(
                 {"downloaded_tile_count": len(lidar_paths), "downloaded_bytes": downloaded_bytes,
@@ -730,6 +874,10 @@ def main() -> None:
             )
             records[slug] = record
             checkpoint(records)
+            print(
+                "  Stage 4/6: auditing classifications, rasterizing, and validating nDSM",
+                flush=True,
+            )
             output, class_audit, valid_pixels, building_pixels = build_three_band_ndsm(
                 slug, lidar_paths, footprint, template, compatible,
                 args.ground_class, projects, args.overwrite,
@@ -743,11 +891,14 @@ def main() -> None:
                     "status": "ndsm_validated",
                 }
             )
+            print("  Stage 5/6: checkpointing the validated three-band output", flush=True)
             if args.confirm_delete_lidar:
+                print("  Stage 6/6: deleting only manifest-listed raw LiDAR", flush=True)
                 delete_manifest_lidar(tile_manifest, output, slug)
                 record["lidar_deleted"] = True
                 record["status"] = "complete_lidar_deleted"
             else:
+                print("  Stage 6/6: retaining raw LiDAR (deletion not authorized)", flush=True)
                 record["lidar_deleted"] = False
                 record["status"] = "complete_lidar_retained"
             records[slug] = record
