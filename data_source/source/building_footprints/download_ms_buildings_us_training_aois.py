@@ -116,6 +116,12 @@ QUADKEY_LEVEL = 9
 OUTPUT_LAYER = "building_footprints_5km"
 DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 USER_AGENT = "building-height-prediction/1.0 ms-buildings-us-aoi"
+# Clipping occurs in the AOI CRS, while the boundary audit occurs in a local
+# metric CRS. Reprojection can create microscopic coordinate slivers along a
+# shared boundary. Ignore only slivers lying within 5 cm of that boundary;
+# anything beyond the buffered AOI remains a hard failure.
+BOUNDARY_POSITION_TOLERANCE_METERS = 0.05
+BOUNDARY_AREA_TOLERANCE_M2 = 0.01
 
 CITY_MANIFEST_COLUMNS = [
     "city_slug",
@@ -721,6 +727,27 @@ def metric_area(frame: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame) -> float:
     return float(frame.to_crs(metric_crs).geometry.area.sum())
 
 
+def boundary_overflow_area_m2(
+    frame: gpd.GeoDataFrame, aoi: gpd.GeoDataFrame
+) -> tuple[float, float]:
+    """Return raw and material footprint area outside the AOI in square metres.
+
+    ``raw`` includes harmless floating-point slivers introduced when the
+    independently reprojected AOI and clipped geometries are reconstructed.
+    ``material`` excludes only geometry within five centimetres of the AOI
+    boundary and is the value used for the fail-loud validation.
+    """
+    metric_crs = aoi.estimate_utm_crs()
+    if metric_crs is None:
+        raise RuntimeError("Could not determine metric CRS for boundary validation")
+    metric_geometries = frame.to_crs(metric_crs).geometry
+    metric_aoi = aoi.to_crs(metric_crs).geometry.iloc[0]
+    raw_outside = metric_geometries.difference(metric_aoi)
+    tolerated_aoi = metric_aoi.buffer(BOUNDARY_POSITION_TOLERANCE_METERS)
+    material_outside = metric_geometries.difference(tolerated_aoi)
+    return float(raw_outside.area.sum()), float(material_outside.area.sum())
+
+
 def write_and_validate_output(
     frame: gpd.GeoDataFrame,
     aoi: gpd.GeoDataFrame,
@@ -749,12 +776,12 @@ def write_and_validate_output(
         raise RuntimeError("Output contains missing or empty geometries")
     if not check.geometry.is_valid.all():
         raise RuntimeError("Output contains invalid geometries")
-    metric_crs = aoi.estimate_utm_crs()
-    if metric_crs is None:
-        raise RuntimeError("Could not determine metric CRS for boundary validation")
-    outside = check.to_crs(metric_crs).geometry.difference(aoi.to_crs(metric_crs).geometry.iloc[0])
-    if float(outside.area.sum()) > 0.01:
-        raise RuntimeError(f"Output geometries extend outside AOI by {outside.area.sum()} m2")
+    raw_outside_m2, material_outside_m2 = boundary_overflow_area_m2(check, aoi)
+    if material_outside_m2 > BOUNDARY_AREA_TOLERANCE_M2:
+        raise RuntimeError(
+            "Output geometries materially extend outside AOI: "
+            f"raw={raw_outside_m2:.6f} m2, beyond_5cm={material_outside_m2:.6f} m2"
+        )
     area_m2 = float(check.to_crs(metric_crs).geometry.area.sum())
     if path.exists():
         path.unlink()
@@ -776,12 +803,12 @@ def validate_existing_output(city_slug: str, aoi: gpd.GeoDataFrame, native_crs: 
         raise RuntimeError(f"Existing output is empty or has the wrong CRS: {path}")
     if "height" in {column.lower() for column in frame.columns}:
         raise RuntimeError(f"Existing output contains forbidden Microsoft height: {path}")
-    metric_crs = aoi.estimate_utm_crs()
-    if metric_crs is None:
-        raise RuntimeError("Could not determine metric CRS for existing-output audit")
-    outside = frame.to_crs(metric_crs).geometry.difference(aoi.to_crs(metric_crs).geometry.iloc[0])
-    if float(outside.area.sum()) > 0.01:
-        raise RuntimeError(f"Existing output extends outside its AOI: {path}")
+    raw_outside_m2, material_outside_m2 = boundary_overflow_area_m2(frame, aoi)
+    if material_outside_m2 > BOUNDARY_AREA_TOLERANCE_M2:
+        raise RuntimeError(
+            f"Existing output materially extends outside its AOI: {path}; "
+            f"raw={raw_outside_m2:.6f} m2, beyond_5cm={material_outside_m2:.6f} m2"
+        )
     return len(frame)
 
 

@@ -22,6 +22,9 @@ data_source/data/building_footprints/generated/<city_slug>/<city_slug>_building_
 
 Each GeoPackage uses the city AOI's declared CRS. The script fails when an AOI
 has no CRS and verifies output CRS equality before marking a city complete.
+Boundary validation permits only reprojection slivers within 5 cm of the AOI
+edge; geometry extending materially beyond that buffered edge remains a hard
+failure. The same validation is applied when resuming from an existing output.
 Microsoft's model-derived `height` property is intentionally excluded to avoid
 height-label leakage; geometry, confidence, source release, and quadkey
 provenance are retained.
@@ -54,6 +57,10 @@ data_source\source\building_footprints\venv_building_footprints\Scripts\python.e
   --download-workers 4 ^
   --minimum-free-gb 100
 ```
+
+If a previous pilot reached GeoPackage validation but did not finish, rerun it
+with `--overwrite`. Valid cached Microsoft partitions are reused, while the
+temporary GeoPackage is safely recreated.
 
 After visually inspecting the pilot, plan and run all 52 cities with:
 
