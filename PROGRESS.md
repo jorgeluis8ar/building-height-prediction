@@ -855,6 +855,11 @@ Last updated: 2026-08-19
 - Fixed the post-validation footprint-area audit to use the shared CRS-safe
   metric-area helper, eliminating the undefined `metric_crs` failure exposed by
   the Birmingham pilot after its boundary check passed.
+- Added a minimal Python 3.9.12 Windows lock for the US LiDAR orchestrator,
+  moved the Python 3.9 Rasterio pin to the final 1.3-series bugfix wheel 1.3.11,
+  and isolated pip-wheel DLL loading from external Anaconda GDAL/PROJ paths.
+  This preserves the training computer's existing Python version while
+  addressing the Rasterio DLL collision before any LiDAR processing begins.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.

@@ -134,13 +134,20 @@ responds to `python --version` instead:
 ```cmd
 python -m venv data_source\source\height_labels\venv_height_labels
 data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install --upgrade "pip==25.1.1" setuptools wheel
-data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install -r data_source\source\height_labels\requirements.txt
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip install --only-binary=:all: --no-cache-dir -r data_source\source\height_labels\requirements-us-lidar-python39-windows.txt
 data_source\source\height_labels\venv_height_labels\Scripts\python.exe -m pip check
 ```
 
 The separate `requirements-python39-windows.txt` records the exact Python 3.9
 lock and can be used directly for troubleshooting. Do not use the Python 3.11+
 package pins directly in a Python 3.9 environment.
+
+The narrower `requirements-us-lidar-python39-windows.txt` is the preferred lock
+for `run_us_lidar_to_planet_ndsm.py` on the training computer. It excludes
+unneeded plotting dependencies and uses Rasterio 1.3.11. At startup, the US
+workflow removes only external Anaconda `Library\\bin` entries and stale
+GDAL/PROJ data variables so they cannot shadow the self-contained Rasterio
+wheel DLLs inside the Python 3.9 venv.
 
 ## Planet-Aligned nDSM And HTC Targets
 

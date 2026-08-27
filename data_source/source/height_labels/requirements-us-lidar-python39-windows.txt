@@ -1,0 +1,13 @@
+# Minimal US LiDAR-to-Planet environment for 64-bit Python 3.9 on Windows.
+# Keep this workflow isolated from Anaconda/Conda GDAL packages. All packages
+# must be installed as PyPI binary wheels into venv_height_labels.
+
+numpy==1.26.4
+pandas==2.2.3
+pyproj==3.6.1
+shapely==2.0.7
+laspy==2.5.4
+lazrs==0.6.2
+geopandas==0.14.4
+pyogrio==0.7.2
+rasterio==1.3.11

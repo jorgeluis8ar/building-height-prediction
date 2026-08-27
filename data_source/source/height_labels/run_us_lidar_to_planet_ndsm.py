@@ -82,6 +82,53 @@ def relaunch_inside_venv() -> None:
 
 relaunch_inside_venv()
 
+
+def isolate_windows_wheel_dlls() -> None:
+    """Prevent external Conda GDAL/PROJ DLLs from shadowing pip wheels.
+
+    The Windows training machine uses Anaconda's Python 3.9.12 to create this
+    standard venv. Anaconda ``Library\\bin`` entries can remain in PATH after
+    venv activation and override Rasterio's self-contained wheel DLLs. Remove
+    only external Conda library-bin entries and stale GDAL/PROJ data variables;
+    retain the venv, Windows, and ordinary executable paths.
+    """
+    if os.name != "nt":
+        return
+    environment_root = Path(sys.prefix).resolve()
+    filtered: list[str] = []
+    for value in os.environ.get("PATH", "").split(os.pathsep):
+        if not value:
+            continue
+        try:
+            resolved = Path(value).resolve()
+        except OSError:
+            filtered.append(value)
+            continue
+        normalized = str(resolved).replace("/", "\\").lower()
+        is_conda_library_bin = normalized.endswith("\\library\\bin") and (
+            "\\conda\\" in normalized or "\\anaconda" in normalized
+        )
+        try:
+            belongs_to_environment = resolved.is_relative_to(environment_root)
+        except (OSError, ValueError):
+            belongs_to_environment = False
+        if is_conda_library_bin and not belongs_to_environment:
+            continue
+        filtered.append(value)
+    os.environ["PATH"] = os.pathsep.join(filtered)
+    for variable in ("GDAL_DATA", "PROJ_LIB", "PROJ_DATA"):
+        value = os.environ.get(variable)
+        if value:
+            try:
+                belongs_to_environment = Path(value).resolve().is_relative_to(environment_root)
+            except (OSError, ValueError):
+                belongs_to_environment = False
+            if not belongs_to_environment:
+                os.environ.pop(variable, None)
+
+
+isolate_windows_wheel_dlls()
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
