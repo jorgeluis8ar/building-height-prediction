@@ -848,6 +848,10 @@ Last updated: 2026-08-19
   verified parsing, exact clipping, CRS retention, height exclusion, atomic
   GeoPackage output, and the required city-specific filename. No production
   footprint partition was downloaded during the 52-city dry run.
+- Corrected Microsoft footprint boundary validation so independent CRS
+  reprojection cannot reject microscopic clipping slivers. Both new and resumed
+  GeoPackages now ignore only geometry within 5 cm of the AOI edge and continue
+  to fail on material overflow beyond that positional tolerance.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
