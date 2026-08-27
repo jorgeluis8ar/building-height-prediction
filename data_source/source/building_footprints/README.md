@@ -9,6 +9,77 @@ project-ready 5km AOI footprint files.
 python3 data_source/source/building_footprints/clip_building_footprints.py
 ```
 
+`download_ms_buildings_us_training_aois.py` acquires Microsoft Global ML
+Building Footprints for the 52 USGS training cities that do not already have a
+verified Boston or Seattle footprint layer. It computes level-9 quadkeys
+locally, downloads only the required public United States partitions, clips
+each footprint exactly to the WUP 5 km AOI, and writes the filename and folder
+expected by `run_us_lidar_to_planet_ndsm.py`:
+
+```text
+data_source/data/building_footprints/generated/<city_slug>/<city_slug>_building_footprints_5km.gpkg
+```
+
+Each GeoPackage uses the city AOI's declared CRS. The script fails when an AOI
+has no CRS and verifies output CRS equality before marking a city complete.
+Microsoft's model-derived `height` property is intentionally excluded to avoid
+height-label leakage; geometry, confidence, source release, and quadkey
+provenance are retained.
+
+The Microsoft release is pinned by a dated link-index URL. The current default
+is `2026-07-24`. Raw gzip partitions are cached without modification under:
+
+```text
+data_source/data/building_footprints/source/ms_buildings_us/<release_date>/<quadkey>/
+```
+
+The complete metadata-only regression found all 52 cities, 66 unique
+partitions, and approximately 2.668 GB of compressed source data. It downloaded
+no footprint partitions.
+
+On Windows CMD, first plan a single pilot city:
+
+```cmd
+data_source\source\building_footprints\venv_building_footprints\Scripts\python.exe data_source\source\building_footprints\download_ms_buildings_us_training_aois.py ^
+  --dry-run ^
+  --city-slug birmingham_22936
+```
+
+Download, clip, and validate that pilot with four partition workers:
+
+```cmd
+data_source\source\building_footprints\venv_building_footprints\Scripts\python.exe data_source\source\building_footprints\download_ms_buildings_us_training_aois.py ^
+  --confirm-download ^
+  --city-slug birmingham_22936 ^
+  --download-workers 4 ^
+  --minimum-free-gb 100
+```
+
+After visually inspecting the pilot, plan and run all 52 cities with:
+
+```cmd
+data_source\source\building_footprints\venv_building_footprints\Scripts\python.exe data_source\source\building_footprints\download_ms_buildings_us_training_aois.py ^
+  --dry-run ^
+  --city-limit 0
+
+data_source\source\building_footprints\venv_building_footprints\Scripts\python.exe data_source\source\building_footprints\download_ms_buildings_us_training_aois.py ^
+  --confirm-download ^
+  --city-limit 0 ^
+  --download-workers 8 ^
+  --minimum-free-gb 100
+```
+
+The city and partition manifests are written to:
+
+```text
+data_source/data/building_footprints/generated/ms_buildings_us_training_city_manifest.csv
+data_source/data/building_footprints/generated/ms_buildings_us_partition_manifest.csv
+```
+
+Do not launch concurrent copies of the script. `--download-workers` provides
+safe parallel partition transfers inside one process; city clipping, output
+writing, and manifest updates remain coordinated.
+
 After the 5km-intersecting footprint files are generated, contiguous footprint
 diagnostics can be generated with:
 
