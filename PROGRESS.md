@@ -836,6 +836,18 @@ Last updated: 2026-08-19
   use a 15-minute socket timeout, and preserve/resume `.partial` files through
   HTTP Range requests when supported. The default remains one worker; Windows
   runs may request eight without launching unsafe concurrent script processes.
+- Added `download_ms_buildings_us_training_aois.py` to fill the 52-city US
+  building-footprint prerequisite for the LiDAR workflow. It derives Microsoft
+  level-9 quadkeys locally, pins the public `2026-07-24` release, caches only
+  required immutable gzip partitions, streams GeoJSONL records, clips polygons
+  exactly to each WUP 5 km AOI, and writes each GeoPackage in the AOI's declared
+  CRS at the exact city path consumed by the LiDAR orchestrator. Microsoft
+  model-derived height is excluded to prevent target leakage. A complete
+  metadata-only regression found all 52 cities, 66 unique partitions, and an
+  estimated 2.668 GB compressed transfer. An offline Boston partition test
+  verified parsing, exact clipping, CRS retention, height exclusion, atomic
+  GeoPackage output, and the required city-specific filename. No production
+  footprint partition was downloaded during the 52-city dry run.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
