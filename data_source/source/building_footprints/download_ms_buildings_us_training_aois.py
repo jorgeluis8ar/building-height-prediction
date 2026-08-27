@@ -782,7 +782,7 @@ def write_and_validate_output(
             "Output geometries materially extend outside AOI: "
             f"raw={raw_outside_m2:.6f} m2, beyond_5cm={material_outside_m2:.6f} m2"
         )
-    area_m2 = float(check.to_crs(metric_crs).geometry.area.sum())
+    area_m2 = metric_area(check, aoi)
     if path.exists():
         path.unlink()
     temporary.replace(path)

@@ -852,6 +852,9 @@ Last updated: 2026-08-19
   reprojection cannot reject microscopic clipping slivers. Both new and resumed
   GeoPackages now ignore only geometry within 5 cm of the AOI edge and continue
   to fail on material overflow beyond that positional tolerance.
+- Fixed the post-validation footprint-area audit to use the shared CRS-safe
+  metric-area helper, eliminating the undefined `metric_crs` failure exposed by
+  the Birmingham pilot after its boundary check passed.
 
 - Maintain folder-level README files in `data_source/source/<task>/` after
   commits, as required by `claude.md`.
