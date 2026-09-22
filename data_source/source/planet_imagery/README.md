@@ -658,3 +658,56 @@ The output records acquisition time, view and illumination angles, scene/AOI
 centroids, center-offset distance and direction, AOI coverage, edge clearance,
 quality fields, and the final ranking score. Review this table before creating
 any order-compatible selection file.
+
+# Processed U.S. LiDAR City Imagery
+
+`select_planet_scenes_for_processed_us_lidar.py` creates the Planet acquisition
+input for U.S. cities whose `run_us_lidar_to_planet_ndsm.py` manifest records a
+validated nDSM and whose referenced nDSM raster exists locally. It does not use
+the broader set of cities where LiDAR is merely available.
+
+For a LiDAR collection spanning multiple calendar years, the script selects one
+year reproducibly using seed `20260921` and the minimum SHA-256 score of
+`seed:city_slug:year`. The result is random-like but invariant to operating
+system, row ordering, and repeated execution. The selected year and full draw
+audit are written to:
+
+```text
+data_source/data/planet_imagery/generated/processed_us_lidar_scene_selection/
+    processed_us_lidar_city_years.csv
+```
+
+Every city is evaluated under the same scene hierarchy:
+
+1. standard-quality PSScene imagery;
+2. the chosen LiDAR year first, nearest post-LiDAR years second, and flagged
+   pre-LiDAR fallback years third;
+3. solstice-season scenes before non-solstice fallback scenes;
+4. a four-summer/four-winter target and two scenes from each cardinal
+   scene-centroid direction;
+5. strict `100% AOI coverage + 0% cloud` first, followed by the documented
+   `99.5%/0%`, `99.5%/1%`, and `95%/lowest-cloud` fallback tiers;
+6. maximum sun-elevation diversity, RGB+NIR surface-reflectance availability,
+   8-band preference, larger absolute view angle, and lower atmospheric
+   artifact penalty as deterministic tie-breakers.
+
+The selection stage checks Planet asset listings but cannot activate, order, or
+download data. It must finish with exactly eight asset-verified scenes for every
+completed city before its combined CSV is passed to the existing orderer.
+
+Orders and downloads use dedicated paths so they cannot overwrite the earlier
+global training acquisition:
+
+```text
+data_source/data/planet_imagery/generated/processed_us_lidar_orders/
+    planet_processed_us_lidar_orders_manifest.csv
+
+data_source/data/planet_imagery/source/processed_us_lidar/
+    <city_slug>/<order_uuid>/PSScene/
+```
+
+Always run the orderer with `--dry-run` before `--confirm-order`. Once every
+order reaches Planet state `success`, run the downloader with `--dry-run`
+before `--confirm-download`. The orderer creates one AOI-clipped order per city,
+and the downloader accepts a city only when Planet's delivered manifest verifies
+every expected file.
