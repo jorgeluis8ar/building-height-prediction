@@ -361,7 +361,9 @@ async def main() -> None:
             raise ValueError("Requested completed-city batch is empty")
 
         metadata_by_city = lidar_selector.load_combined_metadata(
-            metadata_path, set(years["city_slug"].astype(str))
+            metadata_path,
+            set(years["city_slug"].astype(str)),
+            allow_extra_cities=True,
         )
         asset_cache_path = output_dir / "planet_scene_asset_availability.csv"
         asset_cache = global_selector.load_asset_cache(asset_cache_path)

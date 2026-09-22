@@ -269,6 +269,7 @@ def prepare_metadata_frame(
 def load_combined_metadata(
     path: Path,
     expected_city_slugs: set[str],
+    allow_extra_cities: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Load and validate one combined 94-city file once, grouped by city.
 
@@ -291,11 +292,15 @@ def load_combined_metadata(
     actual_city_slugs = set(frame["city_slug"].astype(str))
     missing_cities = sorted(expected_city_slugs.difference(actual_city_slugs))
     extra_cities = sorted(actual_city_slugs.difference(expected_city_slugs))
-    if missing_cities or extra_cities:
+    if missing_cities or (extra_cities and not allow_extra_cities):
         raise ValueError(
             "Combined metadata city set does not equal the 94-city input. "
             f"Missing={missing_cities[:20]}; extra={extra_cities[:20]}"
         )
+    if allow_extra_cities:
+        # Subset workflows intentionally read the shared 94-city database.
+        # Require all requested cities, then discard unrelated city rows.
+        frame = frame[frame["city_slug"].astype(str).isin(expected_city_slugs)].copy()
     grouped = {}
     for city_slug, city_frame in frame.groupby("city_slug", sort=False):
         slug = str(city_slug)
