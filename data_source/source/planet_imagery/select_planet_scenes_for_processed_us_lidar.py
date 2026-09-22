@@ -207,7 +207,18 @@ def load_completed_cities(manifest_path: Path, inventory_path: Path, seed: int) 
             "Completed manifest rows reference missing nDSM files: " + "; ".join(missing_outputs)
         )
 
-    joined = completed.merge(
+    # The run manifest also carries descriptive fields such as city_name. Keep
+    # only processing fields before joining the authoritative city inventory;
+    # otherwise pandas adds _x/_y suffixes and the expected metadata names no
+    # longer exist. This is especially important for manifests produced by the
+    # Windows orchestrator, which use the complete MANIFEST_COLUMNS schema.
+    completed_processing = completed[
+        [
+            "city_slug", "status", "output_ndsm_path",
+            "lidar_collect_start", "lidar_collect_end",
+        ]
+    ].copy()
+    joined = completed_processing.merge(
         inventory[
             [
                 "wup_urbancode", "city_slug", "city_name", "country", "split_group",
