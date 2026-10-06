@@ -17,6 +17,16 @@ Last updated: 2026-08-19
 
 ## Complete
 
+- Added `prepare_us44_htc_framework.py`, a fail-loud, resumable Windows
+  pipeline for constructing four-scene and eight-scene RGB+NIR HTC datasets
+  from the 44 processed U.S. LiDAR cities. It inventories inputs, creates a
+  seeded 19/19/6 city split, builds canonical 3 m target chips, aligns
+  PlanetScope and UDM2 observations, calculates training-only statistics, and
+  validates all output contracts.
+- Added deterministic contract tests and the Windows CMD guide
+  `data_source/source/ml_models/US44_HTC_DATASET_FRAMEWORK.md`. No model was
+  trained and no 44-city generated dataset was built on this computer.
+
 - Added safe Windows-compatible global training order/download scripts. The
   order workflow creates one deterministic AOI-clipped plan per training city,
   grouping 8-band and 4-band bundles into 711 requests for 6,350 available

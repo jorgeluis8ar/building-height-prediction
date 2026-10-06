@@ -26,6 +26,15 @@ This folder logs modeling decisions, planned experiments, and reproducible
 machine-learning scripts for predicting building height from PlanetScope
 imagery.
 
+## Forty-Four-City Windows Dataset Framework
+
+`prepare_us44_htc_framework.py` creates Windows-ready four-scene and
+eight-scene RGB+NIR HTC datasets for the 44 processed U.S. LiDAR cities. It
+performs a seeded 19/19/6 city split, creates canonical 256-by-256 target
+chips, aligns PlanetScope and UDM2 observations, calculates training-only
+statistics, and validates the loader contract. It does not train a model. See
+`US44_HTC_DATASET_FRAMEWORK.md` for the Windows CMD workflow.
+
 Generated model-ready tables, predictions, metrics, and trained model artifacts
 should be written under:
 
