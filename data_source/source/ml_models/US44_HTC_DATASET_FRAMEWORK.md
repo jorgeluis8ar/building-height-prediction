@@ -85,7 +85,7 @@ such as `py -3.9`, not a full patch-version selector.
 ```text
 data_source\data\height_labels\generated\us_training_planet_ndsm\us_lidar_to_planet_ndsm_manifest.csv
 data_source\data\planet_imagery\generated\processed_us_lidar_scene_selection\selected_processed_us_lidar_planet_scenes.csv
-data_source\data\planet_imagery\source\training_lidar_94\<city_slug>\...
+data_source\data\planet_imagery\source\processed_us_lidar\<city_slug>\...
 ```
 
 The nDSM must contain continuous nDSM, building-only nDSM, and LiDAR QA bands.
@@ -113,14 +113,14 @@ Confirm the required manifests and downloaded-data roots before starting:
 ```cmd
 dir data_source\data\height_labels\generated\us_training_planet_ndsm\us_lidar_to_planet_ndsm_manifest.csv
 dir data_source\data\planet_imagery\generated\processed_us_lidar_scene_selection\selected_processed_us_lidar_planet_scenes.csv
-dir data_source\data\planet_imagery\source\training_lidar_94
+dir data_source\data\planet_imagery\source\processed_us_lidar
 ```
 
 Confirm that the scene root contains city directories and that the nDSM output
 root exists:
 
 ```cmd
-dir /ad /b data_source\data\planet_imagery\source\training_lidar_94
+dir /ad /b data_source\data\planet_imagery\source\processed_us_lidar
 dir /s /b data_source\data\height_labels\generated\us_training_planet_ndsm\*.tif
 ```
 
