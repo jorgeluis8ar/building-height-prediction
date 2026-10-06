@@ -18,7 +18,7 @@ git branch --show-current
 git fetch origin us-lidar-planet-ndsm
 git switch us-lidar-planet-ndsm
 git pull --ff-only origin us-lidar-planet-ndsm
-git log -1 --oneline
+git log -3 --oneline
 ```
 
 Before pulling, `git status` should report `nothing to commit, working tree
@@ -27,9 +27,10 @@ longer needed. The commands above assume that the working branch is
 `us-lidar-planet-ndsm`. If the work has been merged into `main`, replace the
 branch name in the fetch, switch, and pull commands with `main`.
 
-The final `git log` output should show this change at the top:
+The recent `git log` output should include these framework changes:
 
 ```text
+fix(ml): correct US44 inventory discovery
 feat(ml): add Windows US44 HTC dataset framework
 ```
 
