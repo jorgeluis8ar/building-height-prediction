@@ -13,6 +13,7 @@ import pickle
 import random
 import shutil
 import sys
+import time
 import traceback
 from typing import Any, Iterable, Optional, Union
 
@@ -80,11 +81,23 @@ def rel(path: Path) -> str:
     return path.resolve().relative_to(PROJECT_ROOT).as_posix()
 
 
+def replace_with_retry(temporary: Path, destination: Path) -> None:
+    """Replace an output atomically, tolerating short Windows file locks."""
+    for attempt in range(8):
+        try:
+            os.replace(str(temporary), str(destination))
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
 def atomic_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(text, encoding="utf-8")
-    os.replace(str(temporary), str(path))
+    replace_with_retry(temporary, path)
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -95,7 +108,7 @@ def atomic_csv(frame: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     frame.to_csv(temporary, index=False)
-    os.replace(str(temporary), str(path))
+    replace_with_retry(temporary, path)
 
 
 def atomic_pickle(value: Any, path: Path) -> None:
@@ -103,14 +116,14 @@ def atomic_pickle(value: Any, path: Path) -> None:
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("wb") as stream:
         pickle.dump(value, stream)
-    os.replace(str(temporary), str(path))
+    replace_with_retry(temporary, path)
 
 
 def atomic_torch(value: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     torch.save(value, temporary)
-    os.replace(str(temporary), str(path))
+    replace_with_retry(temporary, path)
 
 
 def logger_for(root: Path, stage: str) -> tuple[logging.Logger, Path]:
@@ -297,7 +310,7 @@ def write_raster(path: Path, profile: dict[str, Any], data: np.ndarray, descript
         dst.write(data)
         for index, name in enumerate(descriptions, 1):
             dst.set_band_description(index, name)
-    os.replace(str(temporary), str(path))
+    replace_with_retry(temporary, path)
 
 
 def stage_canonical(args: argparse.Namespace, root: Path, log: logging.Logger) -> None:
@@ -507,7 +520,7 @@ def copy_atomic(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(destination.name + ".tmp")
     shutil.copy2(source, temporary)
-    os.replace(str(temporary), str(destination))
+    replace_with_retry(temporary, destination)
 
 
 def stage_build(args: argparse.Namespace, root: Path, log: logging.Logger) -> None:

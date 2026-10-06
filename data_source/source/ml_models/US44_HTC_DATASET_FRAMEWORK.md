@@ -290,3 +290,10 @@ data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe data_source\sour
 ```
 
 Always rerun `statistics` and `validate` after rebuilding chips or datasets.
+
+On Windows, cloud synchronization, antivirus scanning, or an open editor can
+briefly lock `pipeline_status.json`. The writer retries transient sharing
+violations automatically. If Windows still reports `PermissionError`, close
+any program displaying that JSON file, wait for synchronization to finish,
+and rerun the same stage. A stage log that already reports its main output as
+created can be rerun safely; the deterministic split will be identical.
