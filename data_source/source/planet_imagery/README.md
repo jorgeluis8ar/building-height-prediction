@@ -83,7 +83,9 @@ legacy 29-city order/download programs:
   downloads at most 10 cities per call by default. It accepts only `success`,
   blocks `partial` for manual review, checks free disk space, and marks a city
   downloaded only after all files named by Planet's delivered `manifest.json`
-  exist locally.
+  exist locally and every requested scene ID has both an SR and UDM2 raster.
+  This second reconciliation prevents a partially populated city directory
+  from being mistaken for a complete multi-bundle delivery.
 
 Both scripts reject validation/testing rows, use relative repository paths,
 write dated logs, and require explicit confirmation flags for external writes.

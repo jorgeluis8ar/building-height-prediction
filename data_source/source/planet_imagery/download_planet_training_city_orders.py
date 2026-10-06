@@ -162,6 +162,7 @@ def load_manifest(path: Path) -> pd.DataFrame:
     manifest = pd.read_csv(path, dtype=str).fillna("")
     required = {
         "split_group", "city_slug", "order_id", "order_state", "output_dir",
+        "scene_ids_json",
         "download_status", "downloaded_files_json", "download_bytes",
         "download_checked_utc", "download_error",
     }
@@ -228,6 +229,45 @@ def verify_download(output_dir: Path) -> tuple[bool, list[Path], int, str]:
     paths = sorted(set([*manifests, *expected]))
     total_bytes = sum(path.stat().st_size for path in paths)
     return True, paths, total_bytes, ""
+
+
+def verify_requested_scenes(output_dir: Path, scene_ids_json: str) -> tuple[bool, str]:
+    """Require one SR and one UDM2 raster for every requested scene ID."""
+    try:
+        scene_ids = json.loads(scene_ids_json)
+    except json.JSONDecodeError as error:
+        return False, f"invalid scene_ids_json: {error}"
+    if not isinstance(scene_ids, list) or not scene_ids:
+        return False, "scene_ids_json is not a non-empty list"
+
+    missing: list[str] = []
+    ambiguous: list[str] = []
+    for scene_id in scene_ids:
+        scene_tifs = [
+            path for path in output_dir.rglob(f"{scene_id}*.tif") if path.is_file()
+        ] if output_dir.is_dir() else []
+        sr = [
+            path for path in scene_tifs
+            if "analyticms" in path.name.lower()
+            and "_sr" in path.name.lower()
+            and "udm" not in path.name.lower()
+        ]
+        udm2 = [path for path in scene_tifs if "udm2" in path.name.lower()]
+        for label, matches in (("SR", sr), ("UDM2", udm2)):
+            clipped = [path for path in matches if "clip" in path.name.lower()]
+            usable = clipped if clipped else matches
+            if not usable:
+                missing.append(f"{scene_id}:{label}")
+            elif len(usable) > 1:
+                ambiguous.append(f"{scene_id}:{label}={len(usable)}")
+    if missing or ambiguous:
+        details = []
+        if missing:
+            details.append(f"missing {len(missing)} products ({', '.join(missing[:12])})")
+        if ambiguous:
+            details.append(f"ambiguous {len(ambiguous)} products ({', '.join(ambiguous[:12])})")
+        return False, "; ".join(details)
+    return True, ""
 
 
 async def get_order_with_retries(
@@ -336,7 +376,10 @@ async def async_main() -> int:
 
                 output_dir = resolve_project_path(Path(row["output_dir"]), output=True)
                 complete, verified_paths, total_bytes, verification_error = verify_download(output_dir)
-                if complete and not args.overwrite:
+                scenes_complete, scene_error = verify_requested_scenes(
+                    output_dir, str(row["scene_ids_json"])
+                )
+                if complete and scenes_complete and not args.overwrite:
                     manifest.loc[index, "download_status"] = "downloaded_verified"
                     manifest.loc[index, "downloaded_files_json"] = json.dumps(
                         [portable_path(path) for path in verified_paths], separators=(",", ":")
@@ -346,6 +389,9 @@ async def async_main() -> int:
                     atomic_write_manifest(manifest, manifest_path)
                     print(f"  skipped: verified existing download ({total_bytes:,} bytes)", flush=True)
                     continue
+                if complete and not scenes_complete:
+                    verification_error = scene_error
+                    print(f"  incomplete requested scenes: {scene_error}", flush=True)
                 if state == "partial":
                     manifest.loc[index, "download_status"] = "blocked_partial_order"
                     manifest.loc[index, "download_error"] = "Partial orders require manual review; not downloaded"
@@ -378,7 +424,12 @@ async def async_main() -> int:
                     orders, order_id, output_dir, args.max_retries, args.overwrite
                 )
                 complete, verified_paths, total_bytes, verification_error = verify_download(output_dir)
-                if not complete:
+                scenes_complete, scene_error = verify_requested_scenes(
+                    output_dir, str(row["scene_ids_json"])
+                )
+                if not complete or not scenes_complete:
+                    if not scenes_complete:
+                        verification_error = scene_error
                     raise IOError(f"Downloaded order failed manifest verification: {verification_error}")
                 manifest.loc[index, "download_status"] = "downloaded_verified"
                 manifest.loc[index, "downloaded_files_json"] = json.dumps(

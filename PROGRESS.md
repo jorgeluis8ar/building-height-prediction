@@ -30,6 +30,10 @@ Last updated: 2026-08-19
   universe while extra nDSM-only cities are audited separately. Planet SR and
   UDM2 discovery now supports sensor-dependent delivered filename suffixes and
   prefers the AOI-clipped raster without accepting ambiguous matches.
+- Strengthened the Planet training-city downloader so existing and new
+  downloads are reconciled against every requested scene ID. A city now
+  requires both SR and UDM2 rasters for all eight scenes before it can be
+  marked `downloaded_verified`.
 
 - Added safe Windows-compatible global training order/download scripts. The
   order workflow creates one deterministic AOI-clipped plan per training city,
