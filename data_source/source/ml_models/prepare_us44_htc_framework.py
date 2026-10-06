@@ -153,10 +153,39 @@ def find_one(root: Path, patterns: Iterable[str], label: str) -> Path:
     return next(iter(matches))
 
 
+def choose_delivered_raster(candidates: Iterable[Path], label: str, root: Path) -> Path:
+    """Choose one delivered raster, preferring the AOI-clipped product."""
+    matches = sorted({path.resolve() for path in candidates if path.is_file()})
+    clipped = [path for path in matches if "clip" in path.name.lower()]
+    usable = clipped if len(clipped) == 1 else matches
+    if len(usable) != 1:
+        raise RuntimeError(
+            f"Expected one {label} under {root}; found {len(matches)}: {matches[:5]}"
+        )
+    return usable[0]
+
+
 def locate_scene(root: Path, city: str, scene: str) -> tuple[Path, Path]:
     city_root = root / city
-    sr = find_one(city_root, (f"**/{scene}_3B_AnalyticMS_SR_8b_clip.tif", f"**/{scene}_3B_AnalyticMS_SR_clip.tif"), f"SR raster for {city}/{scene}")
-    udm = find_one(city_root, (f"**/{scene}_3B_udm2_clip.tif",), f"UDM2 raster for {city}/{scene}")
+    # Planet delivery filenames vary by sensor generation and processing
+    # bundle. Match by scene ID and product identity instead of assuming one
+    # exact 4-band or 8-band suffix.
+    scene_tifs = list(city_root.glob(f"**/{scene}*.tif"))
+    sr = choose_delivered_raster(
+        (
+            path for path in scene_tifs
+            if "analyticms" in path.name.lower()
+            and "_sr" in path.name.lower()
+            and "udm" not in path.name.lower()
+        ),
+        f"SR raster for {city}/{scene}",
+        city_root,
+    )
+    udm = choose_delivered_raster(
+        (path for path in scene_tifs if "udm2" in path.name.lower()),
+        f"UDM2 raster for {city}/{scene}",
+        city_root,
+    )
     return sr, udm
 
 
@@ -185,7 +214,15 @@ def stage_inventory(args: argparse.Namespace, root: Path, log: logging.Logger) -
     scene_root = project_path(args.scene_root)
     records: list[dict[str, Any]] = []
     normalized: list[dict[str, Any]] = []
-    for city in sorted(set(ndsm[ndsm_city]) | set(scenes[scene_city])):
+    # The selected-scene manifest defines this framework's 44-city universe.
+    # The nDSM manifest can legitimately contain additional processed cities.
+    selected_cities = set(scenes[scene_city])
+    ndsm_only = sorted(set(ndsm[ndsm_city]) - selected_cities)
+    atomic_csv(
+        pd.DataFrame({"city_slug": ndsm_only, "reason": "not_in_selected_44_city_scene_manifest"}),
+        root / STAGING_NAME / "ignored_ndsm_only_cities.csv",
+    )
+    for city in sorted(selected_cities):
         errors: list[str] = []
         ndsm_rows = ndsm[ndsm[ndsm_city] == city]
         ndsm_path: Optional[Path] = None

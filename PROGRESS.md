@@ -26,6 +26,10 @@ Last updated: 2026-08-19
 - Added deterministic contract tests and the Windows CMD guide
   `data_source/source/ml_models/US44_HTC_DATASET_FRAMEWORK.md`. No model was
   trained and no 44-city generated dataset was built on this computer.
+- Corrected US44 inventory so the selected-scene manifest defines the 44-city
+  universe while extra nDSM-only cities are audited separately. Planet SR and
+  UDM2 discovery now supports sensor-dependent delivered filename suffixes and
+  prefers the AOI-clipped raster without accepting ambiguous matches.
 
 - Added safe Windows-compatible global training order/download scripts. The
   order workflow creates one deterministic AOI-clipped plan per training city,

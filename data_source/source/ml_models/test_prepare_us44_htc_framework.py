@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
+import tempfile
 import unittest
 
 import pandas as pd
 
-from prepare_us44_htc_framework import select_four
+from prepare_us44_htc_framework import choose_delivered_raster, select_four
 
 
 class US44FrameworkTest(unittest.TestCase):
@@ -46,6 +48,16 @@ class US44FrameworkTest(unittest.TestCase):
         selected, audit = select_four(frame)
         self.assertEqual(len(selected), 4)
         self.assertTrue(all(row["match_type"] == "same_season" for row in audit))
+
+    def test_delivery_raster_prefers_clip_with_variable_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw = root / "scene_3B_AnalyticMS_SR_harmonized.tif"
+            clipped = root / "scene_3B_AnalyticMS_SR_harmonized_clip.tif"
+            raw.touch()
+            clipped.touch()
+            selected = choose_delivered_raster([raw, clipped], "SR test raster", root)
+            self.assertEqual(selected, clipped.resolve())
 
 
 if __name__ == "__main__":

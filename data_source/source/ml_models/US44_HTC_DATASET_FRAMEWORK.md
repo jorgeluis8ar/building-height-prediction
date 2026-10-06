@@ -127,6 +127,18 @@ The inventory stage performs the authoritative check for exactly 44 complete
 cities and eight SR/UDM2 scene pairs per city. Do not proceed to later stages
 if inventory fails.
 
+The selected-scene manifest defines the authoritative 44-city universe. The
+nDSM manifest may contain additional processed cities; these are intentionally
+excluded and recorded in:
+
+```text
+data_source\data\ml_models\generated\htc_dc_net\us_44_city_staging_v1\ignored_ndsm_only_cities.csv
+```
+
+Planet filenames differ between sensor generations. Inventory identifies SR
+and UDM2 products using the scene ID and product name and prefers the clipped
+raster, rather than requiring one exact 4-band or 8-band filename suffix.
+
 ## 5. Check Available Disk Space
 
 The framework creates staging rasters plus physical copies in two datasets.
