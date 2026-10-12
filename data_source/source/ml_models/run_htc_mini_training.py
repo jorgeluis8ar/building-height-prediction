@@ -444,10 +444,24 @@ def validate_dataset_channels(dataset_dir: Path, in_channels: int) -> None:
     checked = 0
     with manifest_path.open("r", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            chip_id = row["chip_id"]
+            chip_id = row.get("chip_id") or row.get("observation_id")
+            if not chip_id:
+                raise RuntimeError(
+                    f"Manifest row has neither chip_id nor observation_id: {manifest_path}"
+                )
             image_path = dataset_dir / "image" / f"{chip_id}_IMG.tif"
             if not image_path.exists():
                 raise FileNotFoundError(image_path)
+            file_stat = image_path.stat()
+            if (
+                sys.platform == "darwin"
+                and file_stat.st_size > 0
+                and getattr(file_stat, "st_blocks", 1) == 0
+            ):
+                raise RuntimeError(
+                    f"{image_path} is a zero-allocation sparse placeholder. "
+                    "Make the dataset available offline in Dropbox before training."
+                )
             with rasterio.open(image_path) as src:
                 if src.count != in_channels:
                     raise RuntimeError(

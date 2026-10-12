@@ -362,3 +362,106 @@ data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe data_source\sour
 
 This pilot intentionally diagnoses training behavior on two cities. It does
 not replace evaluation on the unchanged validation and test city splits.
+
+## 11. Run The Two-City Pilot On macOS
+
+The original Mac checkout uses the same dataset and seed as the Windows pilot.
+Seed `20260721` selects `greenville_23005` and `rochester_23118`, containing
+1,056 four-channel scene observations in total.
+
+### Make Dropbox Data Local
+
+Training cannot read Dropbox placeholders. In Finder, locate
+`us_44_rgbnir_4scene_v1`, right-click it, and choose **Make Available Offline**.
+Wait for Dropbox to report that synchronization is complete. The dataset has
+about 8.2 GB of logical content, before the run-specific mini-dataset copy.
+
+From the repository root, verify that no image TIFF is a zero-allocation
+sparse placeholder:
+
+```bash
+python3 -c 'from pathlib import Path; p=Path("data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1/image"); bad=[f for f in p.glob("*.tif") if f.stat().st_size and getattr(f.stat(),"st_blocks",1)==0]; print("Sparse placeholders:",len(bad)); print(*bad[:10],sep="\n"); raise SystemExit(bool(bad))'
+```
+
+The required result is `Sparse placeholders: 0` and exit status zero.
+
+### Verify The Environment And Selection
+
+```bash
+cd "/Users/jorgeochoa/Library/CloudStorage/Dropbox-Brown/Jorge Ochoa/Research/building-height-prediction"
+export MPLCONFIGDIR=/private/tmp/matplotlib_htc
+export WANDB_MODE=offline
+
+data_source/source/ml_models/venv_htc_dc_net/bin/python -c 'import torch,rasterio,numpy,pandas,yaml,skimage,cv2,matplotlib,timm,fvcore; print("Imports passed"); print("Torch:",torch.__version__)'
+
+data_source/source/ml_models/venv_htc_dc_net/bin/python -c 'import csv,random; from pathlib import Path; p=Path("data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1"); ids={x.strip() for x in (p/"train.txt").read_text().splitlines() if x.strip()}; rows=list(csv.DictReader((p/"chips_manifest.csv").open())); cities=sorted({r["city_slug"] for r in rows if r["observation_id"] in ids}); print(sorted(random.Random(20260721).sample(cities,2)))'
+```
+
+The final command must print:
+
+```text
+['greenville_23005', 'rochester_23118']
+```
+
+### One-Epoch Smoke Test
+
+```bash
+data_source/source/ml_models/venv_htc_dc_net/bin/python \
+  data_source/source/ml_models/run_htc_mini_training.py \
+  --dataset-dir data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1 \
+  --training-city-count 2 \
+  --in-channels 4 \
+  --epochs 1 \
+  --seed 20260721 \
+  --lr 0.00003 \
+  --batch-size 8 \
+  --num-workers 0 \
+  --patience 20 \
+  --height-loss-weighting bins \
+  --height-bin-edges 3,6,10,25,50 \
+  --height-bin-weights 4,3,2,1,3,8 \
+  --background-loss-weight 0.05 \
+  --save-predictions-every 1 \
+  --save-checkpoints-every 1 \
+  --collapse-std-threshold 0.05 \
+  --collapse-min-share 0.8 \
+  --collapse-patience 1 \
+  --stop-on-collapse \
+  --run-name us44_4scene_2city_selected_params_smoke_seed20260721_epoch1
+```
+
+### Fifty-Epoch Run
+
+Run this only after the smoke test writes a checkpoint, prediction summaries,
+and a non-collapsed final prediction check:
+
+```bash
+data_source/source/ml_models/venv_htc_dc_net/bin/python \
+  data_source/source/ml_models/run_htc_mini_training.py \
+  --dataset-dir data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1 \
+  --training-city-count 2 \
+  --in-channels 4 \
+  --epochs 50 \
+  --seed 20260721 \
+  --lr 0.00003 \
+  --batch-size 8 \
+  --num-workers 0 \
+  --patience 20 \
+  --height-loss-weighting bins \
+  --height-bin-edges 3,6,10,25,50 \
+  --height-bin-weights 4,3,2,1,3,8 \
+  --background-loss-weight 0.05 \
+  --save-predictions-every 10 \
+  --save-checkpoints-every 10 \
+  --collapse-std-threshold 0.05 \
+  --collapse-min-share 0.8 \
+  --collapse-patience 1 \
+  --stop-on-collapse \
+  --run-name us44_4scene_2city_selected_params_seed20260721_epoch50
+```
+
+Both runs execute on CPU to preserve the existing selected-model runner's
+behavior. Their outputs are written under
+`data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/`. Monitor
+an active process with `ps -o pid,etime,%cpu,%mem,command -p $(pgrep -f
+'run_htc_mini_training.py' | head -1)`.
