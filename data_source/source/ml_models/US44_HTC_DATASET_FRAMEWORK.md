@@ -297,3 +297,68 @@ violations automatically. If Windows still reports `PermissionError`, close
 any program displaying that JSON file, wait for synchronization to finish,
 and rerun the same stage. A stage log that already reports its main output as
 created can be rerun safely; the deterministic split will be identical.
+
+## 10. Two-City Selected-Model Pilot
+
+The mini-training runner can select complete cities reproducibly from the 19
+training cities. It uses every retained observation for each selected city;
+the four PlanetScope scenes remain independent four-channel RGB+NIR training
+observations rather than being stacked into a 16-channel image. The run writes
+`selected_training_cities.csv` with the selected city names and observation
+counts.
+
+Run a one-epoch infrastructure smoke test first:
+
+```cmd
+data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe data_source\source\ml_models\run_htc_mini_training.py ^
+  --dataset-dir data_source\data\ml_models\generated\htc_dc_net\us_44_rgbnir_4scene_v1 ^
+  --training-city-count 2 ^
+  --in-channels 4 ^
+  --epochs 1 ^
+  --seed 20260721 ^
+  --lr 0.00003 ^
+  --batch-size 8 ^
+  --num-workers 0 ^
+  --patience 20 ^
+  --height-loss-weighting bins ^
+  --height-bin-edges 3,6,10,25,50 ^
+  --height-bin-weights 4,3,2,1,3,8 ^
+  --background-loss-weight 0.05 ^
+  --save-predictions-every 1 ^
+  --save-checkpoints-every 1 ^
+  --collapse-std-threshold 0.05 ^
+  --collapse-min-share 0.8 ^
+  --collapse-patience 1 ^
+  --stop-on-collapse ^
+  --run-name us44_4scene_2city_selected_params_smoke_seed20260721_epoch1
+```
+
+After the smoke test completes without collapse or file errors, run the
+selected 50-epoch configuration. The same seed selects the same two cities:
+
+```cmd
+data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe data_source\source\ml_models\run_htc_mini_training.py ^
+  --dataset-dir data_source\data\ml_models\generated\htc_dc_net\us_44_rgbnir_4scene_v1 ^
+  --training-city-count 2 ^
+  --in-channels 4 ^
+  --epochs 50 ^
+  --seed 20260721 ^
+  --lr 0.00003 ^
+  --batch-size 8 ^
+  --num-workers 0 ^
+  --patience 20 ^
+  --height-loss-weighting bins ^
+  --height-bin-edges 3,6,10,25,50 ^
+  --height-bin-weights 4,3,2,1,3,8 ^
+  --background-loss-weight 0.05 ^
+  --save-predictions-every 10 ^
+  --save-checkpoints-every 10 ^
+  --collapse-std-threshold 0.05 ^
+  --collapse-min-share 0.8 ^
+  --collapse-patience 1 ^
+  --stop-on-collapse ^
+  --run-name us44_4scene_2city_selected_params_seed20260721_epoch50
+```
+
+This pilot intentionally diagnoses training behavior on two cities. It does
+not replace evaluation on the unchanged validation and test city splits.

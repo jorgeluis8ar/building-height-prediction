@@ -37,6 +37,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nyc-chips", type=int, default=5)
     parser.add_argument("--la-chips", type=int, default=5)
+    parser.add_argument(
+        "--training-city-count",
+        type=int,
+        default=0,
+        help=(
+            "Select this many complete cities reproducibly from the dataset's "
+            "training split and use all of their observations. Zero preserves "
+            "the legacy NYC/LA chip-sampling workflow."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=20260707)
     parser.add_argument("--dataset-dir", type=Path, default=DEFAULT_DATASET_DIR)
@@ -267,6 +277,46 @@ def select_chips(
 
     selected.sort(key=lambda r: (r["source_city"], r["chip_id"]))
     return selected
+
+
+def select_training_cities(
+    dataset_dir: Path,
+    city_count: int,
+    seed: int,
+) -> tuple[list[dict], list[str]]:
+    """Select complete training cities and all their scene observations."""
+    if city_count <= 0:
+        raise ValueError("--training-city-count must be positive")
+    manifest_path = dataset_dir / "chips_manifest.csv"
+    train_ids = read_train_ids(dataset_dir)
+    with manifest_path.open("r", newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    if not rows:
+        raise RuntimeError(f"Dataset manifest is empty: {manifest_path}")
+
+    id_column = "observation_id" if "observation_id" in rows[0] else "chip_id"
+    city_column = "city_slug" if "city_slug" in rows[0] else "source_city"
+    training_rows = [row for row in rows if row[id_column] in train_ids]
+    training_cities = sorted({row[city_column] for row in training_rows})
+    if len(training_cities) < city_count:
+        raise RuntimeError(
+            f"Requested {city_count} training cities, but only found "
+            f"{len(training_cities)} in {dataset_dir / 'train.txt'}"
+        )
+
+    selected_cities = sorted(random.Random(seed).sample(training_cities, city_count))
+    selected = []
+    for row in training_rows:
+        if row[city_column] not in selected_cities:
+            continue
+        output = row.copy()
+        output["chip_id"] = row[id_column]
+        output["source_city"] = row[city_column]
+        selected.append(output)
+    selected.sort(key=lambda row: (row["source_city"], row["chip_id"]))
+    if not selected:
+        raise RuntimeError("The selected training cities contain no observations")
+    return selected, selected_cities
 
 
 def create_mini_dataset(selected: list[dict], run_dir: Path, dataset_dir: Path) -> Path:
@@ -806,16 +856,41 @@ def main() -> None:
         )
         return
 
-    selected = select_chips(
-        dataset_dir=dataset_dir,
-        nyc_chips=args.nyc_chips,
-        la_chips=args.la_chips,
-        seed=args.seed,
-        sampling_mode=args.sampling_mode,
-        highrise_share=args.highrise_share,
-        highrise_p95_threshold=args.highrise_p95_threshold,
-        highrise_max_threshold=args.highrise_max_threshold,
-    )
+    selected_cities: list[str] = []
+    if args.training_city_count:
+        selected, selected_cities = select_training_cities(
+            dataset_dir=dataset_dir,
+            city_count=args.training_city_count,
+            seed=args.seed,
+        )
+        print(
+            f"Selected {len(selected_cities)} training cities with seed {args.seed}: "
+            f"{', '.join(selected_cities)}"
+        )
+        print(f"Selected observations: {len(selected)}")
+    else:
+        selected = select_chips(
+            dataset_dir=dataset_dir,
+            nyc_chips=args.nyc_chips,
+            la_chips=args.la_chips,
+            seed=args.seed,
+            sampling_mode=args.sampling_mode,
+            highrise_share=args.highrise_share,
+            highrise_p95_threshold=args.highrise_p95_threshold,
+            highrise_max_threshold=args.highrise_max_threshold,
+        )
+    if selected_cities:
+        selected_city_rows = [
+            {
+                "city_slug": city,
+                "seed": args.seed,
+                "observation_count": sum(
+                    row["source_city"] == city for row in selected
+                ),
+            }
+            for city in selected_cities
+        ]
+        write_csv(run_dir / "selected_training_cities.csv", selected_city_rows)
     mini_dir = create_mini_dataset(selected, run_dir, dataset_dir)
     cfg = prepare_cfg(mini_dir, args)
 
@@ -829,6 +904,8 @@ def main() -> None:
                 "epochs": args.epochs,
                 "nyc_chips": args.nyc_chips,
                 "la_chips": args.la_chips,
+                "training_city_count": args.training_city_count,
+                "selected_training_cities": selected_cities,
                 "lr": cfg["lr"],
                 "batch_size": cfg["batch_size"],
                 "num_workers": cfg["num_workers"],
