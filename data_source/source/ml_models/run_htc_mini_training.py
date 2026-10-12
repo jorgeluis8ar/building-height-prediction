@@ -429,7 +429,11 @@ def load_image_stats(dataset_dir: Path) -> tuple[list[float], list[float]]:
     return list(mean), list(std)
 
 
-def validate_dataset_channels(dataset_dir: Path, in_channels: int) -> None:
+def validate_dataset_channels(
+    dataset_dir: Path,
+    in_channels: int,
+    selected_ids: set[str] | None = None,
+) -> None:
     """Check that image chips and normalization stats match --in-channels."""
     mean, std = load_image_stats(dataset_dir)
     if len(mean) != in_channels or len(std) != in_channels:
@@ -449,6 +453,8 @@ def validate_dataset_channels(dataset_dir: Path, in_channels: int) -> None:
                 raise RuntimeError(
                     f"Manifest row has neither chip_id nor observation_id: {manifest_path}"
                 )
+            if selected_ids is not None and chip_id not in selected_ids:
+                continue
             image_path = dataset_dir / "image" / f"{chip_id}_IMG.tif"
             if not image_path.exists():
                 raise FileNotFoundError(image_path)
@@ -467,6 +473,28 @@ def validate_dataset_channels(dataset_dir: Path, in_channels: int) -> None:
                     raise RuntimeError(
                         f"--in-channels={in_channels}, but {image_path} has {src.count} bands."
                     )
+                if src.width != 256 or src.height != 256:
+                    raise RuntimeError(f"Expected a 256x256 image chip: {image_path}")
+            if selected_ids is not None:
+                for subdir, suffix in (("mask", "_BLG.tif"), ("ndsm", "_AGL.tif")):
+                    companion = dataset_dir / subdir / f"{chip_id}{suffix}"
+                    if not companion.exists():
+                        raise FileNotFoundError(companion)
+                    companion_stat = companion.stat()
+                    if (
+                        sys.platform == "darwin"
+                        and companion_stat.st_size > 0
+                        and getattr(companion_stat, "st_blocks", 1) == 0
+                    ):
+                        raise RuntimeError(
+                            f"{companion} is a zero-allocation sparse placeholder. "
+                            "Make the selected city files available offline in Dropbox."
+                        )
+                    with rasterio.open(companion) as src:
+                        if src.count != 1 or src.width != 256 or src.height != 256:
+                            raise RuntimeError(
+                                f"Expected a one-band 256x256 companion chip: {companion}"
+                            )
             checked += 1
     if checked == 0:
         raise RuntimeError(f"No image chips found in manifest: {manifest_path}")
@@ -790,7 +818,21 @@ def main() -> None:
     dataset_dir = args.dataset_dir.resolve()
     if not dataset_dir.exists():
         raise FileNotFoundError(dataset_dir)
-    validate_dataset_channels(dataset_dir, args.in_channels)
+    preselected: list[dict] | None = None
+    preselected_cities: list[str] = []
+    if args.training_city_count:
+        preselected, preselected_cities = select_training_cities(
+            dataset_dir=dataset_dir,
+            city_count=args.training_city_count,
+            seed=args.seed,
+        )
+        validate_dataset_channels(
+            dataset_dir,
+            args.in_channels,
+            {row["chip_id"] for row in preselected},
+        )
+    else:
+        validate_dataset_channels(dataset_dir, args.in_channels)
 
     run_name = args.run_name or (
         f"nyc{args.nyc_chips}_la{args.la_chips}_seed{args.seed}_"
@@ -872,11 +914,9 @@ def main() -> None:
 
     selected_cities: list[str] = []
     if args.training_city_count:
-        selected, selected_cities = select_training_cities(
-            dataset_dir=dataset_dir,
-            city_count=args.training_city_count,
-            seed=args.seed,
-        )
+        if preselected is None:
+            raise RuntimeError("Training-city preselection was not initialized")
+        selected, selected_cities = preselected, preselected_cities
         print(
             f"Selected {len(selected_cities)} training cities with seed {args.seed}: "
             f"{', '.join(selected_cities)}"

@@ -371,10 +371,16 @@ Seed `20260721` selects `greenville_23005` and `rochester_23118`, containing
 
 ### Make Dropbox Data Local
 
-Training cannot read Dropbox placeholders. In Finder, locate
-`us_44_rgbnir_4scene_v1`, right-click it, and choose **Make Available Offline**.
-Wait for Dropbox to report that synchronization is complete. The dataset has
-about 8.2 GB of logical content, before the run-specific mini-dataset copy.
+Training cannot read Dropbox placeholders. The simplest option is to locate
+`us_44_rgbnir_4scene_v1` in Finder, right-click it, and choose **Make Available
+Offline**. The dataset has about 8.2 GB of logical content, before the
+run-specific mini-dataset copy.
+
+To prioritize only the two pilot cities, open each of `image`, `mask`, and
+`ndsm` in Finder. Search by filename for `c17_`, select every result, and choose
+**Make Available Offline**; then repeat for `c31_`. City `c17` is Greenville
+and city `c31` is Rochester. The pilot runner validates only those selected
+city files, so the other cities may remain online-only.
 
 From the repository root, verify that no image TIFF is a zero-allocation
 sparse placeholder:
@@ -383,7 +389,16 @@ sparse placeholder:
 python3 -c 'from pathlib import Path; p=Path("data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1/image"); bad=[f for f in p.glob("*.tif") if f.stat().st_size and getattr(f.stat(),"st_blocks",1)==0]; print("Sparse placeholders:",len(bad)); print(*bad[:10],sep="\n"); raise SystemExit(bool(bad))'
 ```
 
-The required result is `Sparse placeholders: 0` and exit status zero.
+When downloading the complete dataset, the required result is `Sparse
+placeholders: 0` and exit status zero. For the two-city-only option, verify the
+selected prefixes instead:
+
+```bash
+python3 -c 'from pathlib import Path; root=Path("data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1"); paths=[p for d in ("image","mask","ndsm") for prefix in ("c17_","c31_") for p in (root/d).glob(prefix+"*.tif")]; bad=[p for p in paths if p.stat().st_size and getattr(p.stat(),"st_blocks",1)==0]; print("Selected files:",len(paths)); print("Sparse placeholders:",len(bad)); print(*bad[:10],sep="\n"); raise SystemExit(bool(bad))'
+```
+
+The selected-city check must report `Selected files: 3168` and `Sparse
+placeholders: 0`.
 
 ### Verify The Environment And Selection
 
