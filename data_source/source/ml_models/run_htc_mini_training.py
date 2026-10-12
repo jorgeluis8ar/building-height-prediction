@@ -89,6 +89,15 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Training batch size. Use 32 to match the upstream HTC-DC Net config if memory allows.",
     )
+    parser.add_argument(
+        "--device",
+        choices=["cpu", "mps", "cuda", "auto"],
+        default="cpu",
+        help=(
+            "Training device. Use mps for Apple Silicon, cuda for NVIDIA, or "
+            "auto to prefer CUDA and then MPS. CPU remains the legacy default."
+        ),
+    )
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
         "--patience",
@@ -369,7 +378,7 @@ def prepare_cfg(mini_dir: Path, args: argparse.Namespace) -> dict:
             "num_workers": args.num_workers,
             "max_epochs": args.epochs,
             "seed": args.seed,
-            "device": "cpu",
+            "device": args.device,
             "overfit": False,
             "restore": False,
             "name": args.run_name or f"mini_nyc{args.nyc_chips}_la{args.la_chips}",
@@ -402,6 +411,23 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def resolve_device(requested: str) -> str:
+    """Resolve and validate an explicitly requested PyTorch device."""
+    if requested == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("--device cuda was requested, but CUDA is unavailable")
+    if requested == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError(
+            "--device mps was requested, but PyTorch cannot access Metal/MPS"
+        )
+    return requested
 
 
 def image_to_channels_first(image_np: np.ndarray) -> np.ndarray:
@@ -814,6 +840,10 @@ def main() -> None:
     args = parse_args()
     os.environ.setdefault("WANDB_MODE", "offline")
     os.environ.setdefault("TORCH_HOME", "/private/tmp/torch_htc_cache")
+    if args.device in ("mps", "auto"):
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    args.device = resolve_device(args.device)
+    print(f"Training device: {args.device}")
     set_seed(args.seed)
     dataset_dir = args.dataset_dir.resolve()
     if not dataset_dir.exists():
@@ -875,6 +905,7 @@ def main() -> None:
             "balanced_batches": True,
             "augmentation_profile": args.augmentation_profile,
             "weight_decay": args.weight_decay,
+            "device": args.device,
             "in_channels": args.in_channels,
             "height_loss_weighting": args.height_loss_weighting,
             "height_bin_edges": parse_float_list(args.height_bin_edges),
@@ -963,6 +994,7 @@ def main() -> None:
                 "lr": cfg["lr"],
                 "batch_size": cfg["batch_size"],
                 "num_workers": cfg["num_workers"],
+                "device": args.device,
                 "patience": cfg.get("patience"),
                 "save_predictions_every": args.save_predictions_every,
                 "save_checkpoints_every": args.save_checkpoints_every,

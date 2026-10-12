@@ -406,8 +406,9 @@ placeholders: 0`.
 cd "/Users/jorgeochoa/Library/CloudStorage/Dropbox-Brown/Jorge Ochoa/Research/building-height-prediction"
 export MPLCONFIGDIR=/private/tmp/matplotlib_htc
 export WANDB_MODE=offline
+export PYTORCH_ENABLE_MPS_FALLBACK=1
 
-data_source/source/ml_models/venv_htc_dc_net/bin/python -c 'import torch,rasterio,numpy,pandas,yaml,skimage,cv2,matplotlib,timm,fvcore; print("Imports passed"); print("Torch:",torch.__version__)'
+data_source/source/ml_models/venv_htc_dc_net/bin/python -c 'import torch,rasterio,numpy,pandas,yaml,skimage,cv2,matplotlib,timm,fvcore; print("Imports passed"); print("Torch:",torch.__version__); print("MPS:",torch.backends.mps.is_available()); assert torch.backends.mps.is_available()'
 
 data_source/source/ml_models/venv_htc_dc_net/bin/python -c 'import csv,random; from pathlib import Path; p=Path("data_source/data/ml_models/generated/htc_dc_net/us_44_rgbnir_4scene_v1"); ids={x.strip() for x in (p/"train.txt").read_text().splitlines() if x.strip()}; rows=list(csv.DictReader((p/"chips_manifest.csv").open())); cities=sorted({r["city_slug"] for r in rows if r["observation_id"] in ids}); print(sorted(random.Random(20260721).sample(cities,2)))'
 ```
@@ -430,6 +431,7 @@ data_source/source/ml_models/venv_htc_dc_net/bin/python \
   --seed 20260721 \
   --lr 0.00003 \
   --batch-size 8 \
+  --device mps \
   --num-workers 0 \
   --patience 20 \
   --height-loss-weighting bins \
@@ -460,6 +462,7 @@ data_source/source/ml_models/venv_htc_dc_net/bin/python \
   --seed 20260721 \
   --lr 0.00003 \
   --batch-size 8 \
+  --device mps \
   --num-workers 0 \
   --patience 20 \
   --height-loss-weighting bins \
@@ -475,8 +478,10 @@ data_source/source/ml_models/venv_htc_dc_net/bin/python \
   --run-name us44_4scene_2city_selected_params_seed20260721_epoch50
 ```
 
-Both runs execute on CPU to preserve the existing selected-model runner's
-behavior. Their outputs are written under
+Both runs explicitly use the Apple Metal GPU through `--device mps`. The
+fallback environment variable sends an operation to CPU only when PyTorch has
+no MPS implementation for it; the resolved device is recorded in
+`config_used.yaml` and `run_metadata.json`. Their outputs are written under
 `data_source/data/ml_models/generated/htc_dc_net/mini_training_runs/`. Monitor
 an active process with `ps -o pid,etime,%cpu,%mem,command -p $(pgrep -f
 'run_htc_mini_training.py' | head -1)`.
