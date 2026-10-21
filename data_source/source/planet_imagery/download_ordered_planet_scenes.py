@@ -140,6 +140,15 @@ def parse_args() -> argparse.Namespace:
         help="Manifest written by order_selected_planet_scenes.py.",
     )
     parser.add_argument(
+        "--output-root",
+        type=Path,
+        help=(
+            "Optional download root override. Each order is written beneath "
+            "<output-root>/<city_slug>/<selection_season>_<scene_id>. This "
+            "also replaces portable output_dir values stored in the manifest."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Check order states without downloading files.",
@@ -257,6 +266,8 @@ async def get_order_with_retries(
 async def async_main() -> None:
     args = parse_args()
     args.manifest = resolve_project_path(args.manifest)
+    if args.output_root is not None:
+        args.output_root = resolve_project_path(args.output_root)
 
     if args.dry_run and args.confirm_download:
         raise SystemExit("Use either --dry-run or --confirm-download, not both.")
@@ -292,6 +303,15 @@ async def async_main() -> None:
             order_id = str(row["order_id"]).strip()
             if not order_id:
                 raise ValueError(f"Manifest row {index} is missing order_id")
+
+            if args.output_root is not None:
+                output_dir = (
+                    args.output_root
+                    / str(row["city_slug"])
+                    / f"{row['selection_season']}_{row['scene_id']}"
+                )
+                manifest.loc[index, "output_dir"] = project_relative_path(output_dir)
+                row = manifest.loc[index]
 
             order = await get_order_with_retries(orders_client, order_id)
             if order is None:

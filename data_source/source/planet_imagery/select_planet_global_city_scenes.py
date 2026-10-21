@@ -49,6 +49,7 @@ import argparse
 import asyncio
 import csv
 from datetime import datetime, timezone
+import importlib.util
 import json
 import math
 import os
@@ -383,6 +384,26 @@ def choose_surface_reflectance_asset(assets: set[str]) -> str:
     return ""
 
 
+def load_planet_auth() -> Auth:
+    """Use the API-key-first credential policy shared by search and ordering."""
+    credential_path = SCRIPT_DIR / "PLANET_API.py"
+    if credential_path.is_file():
+        specification = importlib.util.spec_from_file_location(
+            "planet_credentials", credential_path
+        )
+        if specification is None or specification.loader is None:
+            raise RuntimeError(f"Could not load Planet credentials from {credential_path}")
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        local_key = getattr(module, "PL_API_KEY", None)
+        if local_key:
+            return Auth.from_key(str(local_key).strip())
+    environment_key = os.environ.get("PL_API_KEY")
+    if environment_key:
+        return Auth.from_key(environment_key.strip())
+    return Auth.from_user_default_session()
+
+
 async def check_candidate_assets(
     candidates: pd.DataFrame,
     cache: pd.DataFrame,
@@ -412,7 +433,7 @@ async def check_candidate_assets(
             }
     elif needed:
         semaphore = asyncio.Semaphore(concurrency)
-        auth = Auth.from_user_default_session()
+        auth = load_planet_auth()
 
         async with Session(auth=auth) as session:
             client = DataClient(session)

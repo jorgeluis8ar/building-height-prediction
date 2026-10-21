@@ -62,6 +62,17 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--expected-cities", type=int, default=44)
     parser.add_argument("--expected-scenes-per-city", type=int, default=8)
     parser.add_argument("--seed", type=int, default=20261005)
+    parser.add_argument("--train-city-count", type=int, default=19)
+    parser.add_argument("--val-city-count", type=int, default=19)
+    parser.add_argument("--test-city-count", type=int, default=6)
+    parser.add_argument(
+        "--city-split-manifest",
+        type=Path,
+        help="Optional authoritative city_slug/split CSV used instead of random assignment.",
+    )
+    parser.add_argument("--staging-name", default=STAGING_NAME)
+    parser.add_argument("--dataset-4-name", default=DATASETS[4])
+    parser.add_argument("--dataset-8-name", default=DATASETS[8])
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--qa-chips-per-city", type=int, default=3)
@@ -232,7 +243,7 @@ def stage_inventory(args: argparse.Namespace, root: Path, log: logging.Logger) -
     selected_cities = set(scenes[scene_city])
     ndsm_only = sorted(set(ndsm[ndsm_city]) - selected_cities)
     atomic_csv(
-        pd.DataFrame({"city_slug": ndsm_only, "reason": "not_in_selected_44_city_scene_manifest"}),
+        pd.DataFrame({"city_slug": ndsm_only, "reason": "not_in_selected_city_scene_manifest"}),
         root / STAGING_NAME / "ignored_ndsm_only_cities.csv",
     )
     for city in sorted(selected_cities):
@@ -282,10 +293,44 @@ def stage_split(args: argparse.Namespace, root: Path, log: logging.Logger) -> No
     inventory = read_csv(staging / "city_input_inventory.csv")
     complete = inventory["inventory_complete"].astype(str).str.lower().eq("true")
     cities = sorted(inventory.loc[complete, "city_slug"].astype(str))
-    if len(cities) != 44:
-        raise RuntimeError(f"The fixed 19/19/6 split requires 44 cities; found {len(cities)}")
-    random.Random(args.seed).shuffle(cities)
-    groups = {"train": cities[:19], "val": cities[19:38], "test": cities[38:]}
+    if len(cities) != args.expected_cities:
+        raise RuntimeError(f"Expected {args.expected_cities} complete cities; found {len(cities)}")
+    expected_counts = {
+        "train": args.train_city_count,
+        "val": args.val_city_count,
+        "test": args.test_city_count,
+    }
+    if sum(expected_counts.values()) != args.expected_cities:
+        raise RuntimeError(
+            f"Split counts {expected_counts} do not total {args.expected_cities} cities"
+        )
+    if args.city_split_manifest:
+        supplied = read_csv(project_path(args.city_split_manifest)).copy()
+        required = {"city_slug", "split"}
+        missing = required - set(supplied.columns)
+        if missing:
+            raise RuntimeError(f"City split manifest is missing columns: {sorted(missing)}")
+        supplied["city_slug"] = supplied["city_slug"].astype(str)
+        supplied["split"] = supplied["split"].astype(str)
+        if supplied["city_slug"].duplicated().any():
+            raise RuntimeError("City split manifest contains duplicate cities")
+        if set(supplied["city_slug"]) != set(cities):
+            raise RuntimeError("City split manifest city set does not equal inventory city set")
+        invalid = set(supplied["split"]) - set(SPLITS)
+        if invalid:
+            raise RuntimeError(f"City split manifest contains invalid splits: {sorted(invalid)}")
+        counts = supplied["split"].value_counts().to_dict()
+        if any(int(counts.get(split, 0)) != count for split, count in expected_counts.items()):
+            raise RuntimeError(f"City split counts {counts} do not match {expected_counts}")
+        groups = {
+            split: sorted(supplied.loc[supplied["split"].eq(split), "city_slug"])
+            for split in SPLITS
+        }
+    else:
+        random.Random(args.seed).shuffle(cities)
+        train_end = args.train_city_count
+        val_end = train_end + args.val_city_count
+        groups = {"train": cities[:train_end], "val": cities[train_end:val_end], "test": cities[val_end:]}
     rows = []
     rank = 0
     for split in SPLITS:
@@ -294,7 +339,10 @@ def stage_split(args: argparse.Namespace, root: Path, log: logging.Logger) -> No
             rank += 1
             rows.append({"city_slug": city, "split": split, "randomized_rank": rank, "seed": args.seed})
     atomic_csv(pd.DataFrame(rows), staging / "city_split_manifest.csv")
-    log.info("Created city split train=19 val=19 test=6 seed=%d", args.seed)
+    log.info(
+        "Created city split train=%d val=%d test=%d seed=%d",
+        len(groups["train"]), len(groups["val"]), len(groups["test"]), args.seed,
+    )
 
 
 def profile_for(source: rasterio.DatasetReader, count: int, dtype: str, nodata: Union[float, int], transform: rasterio.Affine) -> dict[str, Any]:
@@ -717,7 +765,8 @@ def stage_validate(args: argparse.Namespace, root: Path, log: logging.Logger) ->
         finally:
             sys.path.remove(str(external))
         qa_panels(dataset, frame, args.qa_chips_per_city)
-        atomic_text(dataset / "README.md", f"# {name}\n\nWindows-ready four-channel RGB+NIR HTC dataset with {expected_scenes} independent scene observations per geographic chip. Cities use the deterministic 19/19/6 split with seed {args.seed}; normalization statistics use training cities only.\n")
+        split_counts = frame.drop_duplicates("city_slug")["split"].value_counts().to_dict()
+        atomic_text(dataset / "README.md", f"# {name}\n\nWindows-ready four-channel RGB+NIR HTC dataset with {expected_scenes} independent scene observations per geographic chip. City counts are train={split_counts.get('train', 0)}, validation={split_counts.get('val', 0)}, and test={split_counts.get('test', 0)}; normalization statistics use training cities only.\n")
         log.info("%s: validation passed for %d observations", name, len(frame))
     report = pd.DataFrame(reports)
     atomic_csv(report, root / STAGING_NAME / "alignment_validation_summary.csv")
@@ -741,7 +790,10 @@ def execute(stage: str, args: argparse.Namespace, root: Path, log: logging.Logge
 
 
 def main() -> None:
+    global STAGING_NAME, DATASETS
     args = arguments()
+    STAGING_NAME = args.staging_name
+    DATASETS = {4: args.dataset_4_name, 8: args.dataset_8_name}
     if args.resume and args.overwrite:
         raise ValueError("--resume and --overwrite are mutually exclusive")
     root = project_path(args.output_root)

@@ -54,6 +54,59 @@ dir data_source\source\ml_models\test_prepare_us44_htc_framework.py
 dir data_source\source\ml_models\US44_HTC_DATASET_FRAMEWORK.md
 ```
 
+## Data Files Are Not Distributed Through Git
+
+Git contains the scripts and this guide only. Planet imagery, nDSM rasters,
+and generated CSV manifests must not be added to Git. Transfer the six-city
+order manifest from the computer that created the Planet orders and save it on
+Windows at exactly:
+
+```text
+S:\building-height-prediction\data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\planet_orders_manifest.csv
+```
+
+For the later 50-city dataset extension, transfer the selected-scene metadata
+to this adjacent path as well:
+
+```text
+S:\building-height-prediction\data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\selected_six_us_lidar_postyear_planet_scenes.csv
+```
+
+Verify both manually transferred files from CMD:
+
+```cmd
+dir data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\planet_orders_manifest.csv
+dir data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\selected_six_us_lidar_postyear_planet_scenes.csv
+```
+
+When the Planet orders are ready, first check their states without downloading:
+
+```cmd
+data_source\source\planet_imagery\venv_planet_imagery\Scripts\python.exe data_source\source\planet_imagery\download_ordered_planet_scenes.py ^
+  --manifest data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\planet_orders_manifest.csv ^
+  --output-root data_source\data\planet_imagery\source\processed_us_lidar ^
+  --dry-run
+```
+
+Then download every completed order into the existing processed-LiDAR scene
+root. This command is resumable and can be rerun as remaining orders finish:
+
+```cmd
+data_source\source\planet_imagery\venv_planet_imagery\Scripts\python.exe data_source\source\planet_imagery\download_ordered_planet_scenes.py ^
+  --manifest data_source\data\planet_imagery\generated\six_us_lidar_postyear_scene_selection_v1\planet_orders_manifest.csv ^
+  --output-root data_source\data\planet_imagery\source\processed_us_lidar ^
+  --confirm-download
+```
+
+The downloaded scene directories must therefore be stored below:
+
+```text
+S:\building-height-prediction\data_source\data\planet_imagery\source\processed_us_lidar\<city_slug>\<selection>_<scene_id>\
+```
+
+Do not use `git add` on either data path. The manifest is updated locally with
+Planet order states and downloaded-file paths as the downloader runs.
+
 ## 2. Verify Python and the Virtual Environment
 
 Check the available Python version and architecture:
