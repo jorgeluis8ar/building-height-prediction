@@ -514,13 +514,35 @@ def audit_point_classifications(
 
 US_SURVEY_FOOT_TO_METRE = 1200.0 / 3937.0
 DOCUMENTED_POINT_CRS_FALLBACKS = {
-    # USGS WESM metadata: horiz_crs=2891; legacy delivery elevations are feet.
-    "KY_KENTON_CAMBELLCO_2007": (2891, US_SURVEY_FOOT_TO_METRE),
-    # USGS WESM metadata: horiz_crs=3424; project report documents feet.
-    "NJ_MERCERCO_2009": (3424, US_SURVEY_FOOT_TO_METRE),
-    # USGS WESM metadata: horiz_crs=6347 and vertical CRS 5703 (metres).
-    "NJ_New_Jersey_SANDY_LiDAR_15": (6347, 1.0),
-    "NY_New_York_CMGP_SANDY_LiDAR_15": (6347, 1.0),
+    # Project-specific EPSG codes from the official USGS WESM metadata table.
+    "KY_KENTON_CAMBELLCO_2007": 2891,
+    "NJ_MERCERCO_2009": 3424,
+    "NJ_CAMDEN_BURLINGTON_2004": 3424,
+    "NJ_New_Jersey_SANDY_LiDAR_15": 6347,
+    "NY_New_York_CMGP_SANDY_LiDAR_15": 6347,
+    "FL_MIAMIDADECO_2007": 2881,
+    "FL_MiamiDade_D23": 6438,
+    "PA_STATEWIDE_S_2006_2008": 2272,
+    "PA_Dauphin_County_LiDAR_2016_B16": 6565,
+    "OH_SOUTH_2007": 3735,
+    "KY_WesternKY_A22": 6473,
+}
+DOCUMENTED_PROJECT_Z_SCALES = {
+    # WESM vertical CRS 6360 or legacy project reports specify US survey feet.
+    "KY_KENTON_CAMBELLCO_2007": US_SURVEY_FOOT_TO_METRE,
+    "NJ_MERCERCO_2009": US_SURVEY_FOOT_TO_METRE,
+    "NJ_CAMDEN_BURLINGTON_2004": US_SURVEY_FOOT_TO_METRE,
+    "FL_MIAMIDADECO_2007": US_SURVEY_FOOT_TO_METRE,
+    "FL_MiamiDade_D23": US_SURVEY_FOOT_TO_METRE,
+    "PA_STATEWIDE_S_2006_2008": US_SURVEY_FOOT_TO_METRE,
+    "PA_Dauphin_County_LiDAR_2016_B16": US_SURVEY_FOOT_TO_METRE,
+    "OH_SOUTH_2007": US_SURVEY_FOOT_TO_METRE,
+    "OH_Statewide_Phase3_2021_B21": US_SURVEY_FOOT_TO_METRE,
+    "KY_WesternKY_A22": US_SURVEY_FOOT_TO_METRE,
+    # WESM vertical CRS 5703 specifies metres.
+    "NJ_New_Jersey_SANDY_LiDAR_15": 1.0,
+    "NY_New_York_CMGP_SANDY_LiDAR_15": 1.0,
+    "PA_17County_D24": 1.0,
 }
 
 
@@ -529,20 +551,28 @@ def point_crs_from_header(header: Any, tile_path: Path) -> tuple[Any, float]:
     import pyproj
 
     normalized = tile_path.as_posix().lower()
-    documented = next(
+    documented_crs = next(
         (
-            (project, epsg, z_scale)
-            for project, (epsg, z_scale) in DOCUMENTED_POINT_CRS_FALLBACKS.items()
+            (project, epsg)
+            for project, epsg in DOCUMENTED_POINT_CRS_FALLBACKS.items()
             if project.lower() in normalized
         ),
         None,
     )
+    z_scale = next(
+        (
+            scale
+            for project, scale in DOCUMENTED_PROJECT_Z_SCALES.items()
+            if project.lower() in normalized
+        ),
+        1.0,
+    )
     crs = header.parse_crs()
     if crs is not None:
-        return crs, documented[2] if documented else 1.0
+        return crs, z_scale
 
-    if documented:
-        project, epsg, z_scale = documented
+    if documented_crs:
+        project, epsg = documented_crs
         logging.warning(
             "Using documented EPSG:%s and z-scale %.12f fallback for %s",
             epsg, z_scale, relative_path(tile_path),

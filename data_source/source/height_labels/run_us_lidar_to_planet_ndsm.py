@@ -439,7 +439,7 @@ def select_latest_acquisition(
     inventory_start: str,
     inventory_end: str,
 ) -> tuple[pd.DataFrame, list[str], str, str, float]:
-    """Choose newest complete project, or newest greedy project set at borders.
+    """Choose the newest project and add older projects only to fill gaps.
 
     Official collection dates are preferred. If the USGS collection-index
     attribute query is unavailable, order the already verified project groups
@@ -464,19 +464,18 @@ def select_latest_acquisition(
     if not candidates:
         raise RuntimeError("No tile project has defensible official collection dates")
     candidates.sort(reverse=True)
-    complete = [item for item in candidates if item[2] >= MINIMUM_COVERAGE_PERCENT]
-    if complete:
-        _, project, coverage = complete[0]
-        projects = [project]
-    else:
-        projects = []
-        coverage = 0.0
-        for _, project, _ in candidates:
-            projects.append(project)
-            chosen = city_tiles[city_tiles["selection_project"].isin(projects)]
-            coverage = coverage_percent(aoi, chosen)
-            if coverage >= MINIMUM_COVERAGE_PERCENT:
-                break
+    # Always retain the newest intersecting acquisition. Add progressively
+    # older projects only where they are needed to close spatial coverage gaps.
+    # Choosing an old 100%-coverage project first would discard newer LiDAR
+    # that covers most of the city.
+    projects = []
+    coverage = 0.0
+    for _, project, _ in candidates:
+        projects.append(project)
+        chosen = city_tiles[city_tiles["selection_project"].isin(projects)]
+        coverage = coverage_percent(aoi, chosen)
+        if coverage >= MINIMUM_COVERAGE_PERCENT:
+            break
     if coverage < MINIMUM_COVERAGE_PERCENT:
         raise RuntimeError(f"Latest dated project set covers only {coverage:.6f}% of AOI")
     selected = city_tiles[city_tiles["selection_project"].isin(projects)].copy()
