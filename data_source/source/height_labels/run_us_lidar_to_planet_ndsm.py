@@ -372,7 +372,7 @@ def query_project_dates() -> dict[str, dict[str, str]]:
             ELEVATION_INDEX_URL,
             {
                 "f": "json", "where": "1=1",
-                "outFields": "OBJECTID,collect_start,collect_end,lpc_link",
+                "outFields": "OBJECTID,collect_start,collect_end,horiz_crs,lpc_link",
                 "returnGeometry": "false", "orderByFields": "OBJECTID ASC",
                 "resultOffset": offset, "resultRecordCount": page_size,
             },
@@ -382,17 +382,21 @@ def query_project_dates() -> dict[str, dict[str, str]]:
         features = payload.get("features") or []
         for feature in features:
             values = feature.get("attributes") or {}
-            match = re.search(r"/Projects/([^/]+)", str(values.get("lpc_link", "")))
-            if not match:
+            project = project_key_from_url(str(values.get("lpc_link", "")))
+            if not project:
                 continue
-            project = match.group(1)
             start = epoch_date(values.get("collect_start"))
             end = epoch_date(values.get("collect_end"))
-            current = grouped.setdefault(project, {"start": start, "end": end})
+            crs = str(values.get("horiz_crs") or "").strip()
+            current = grouped.setdefault(
+                project, {"start": start, "end": end, "horizontal_crs": crs}
+            )
             if start and (not current["start"] or start < current["start"]):
                 current["start"] = start
             if end and (not current["end"] or end > current["end"]):
                 current["end"] = end
+            if crs and not current.get("horizontal_crs"):
+                current["horizontal_crs"] = crs
         offset += len(features)
         if not payload.get("exceededTransferLimit") and len(features) < page_size:
             break
@@ -401,6 +405,17 @@ def query_project_dates() -> dict[str, dict[str, str]]:
     if not grouped:
         raise RuntimeError("USGS elevation index returned no project collection dates")
     return grouped
+
+
+def project_key_from_url(url: str) -> str:
+    """Distinguish datasets nested below the generic USGS legacy directory."""
+    match = re.search(r"/Projects/([^/]+)(?:/([^/]+))?", str(url), re.IGNORECASE)
+    if not match:
+        return ""
+    project, nested = match.group(1), match.group(2)
+    if project.lower() == "legacy" and nested:
+        return f"legacy/{nested}"
+    return project
 
 
 def coverage_percent(aoi: Any, rows: pd.DataFrame) -> float:
@@ -432,8 +447,12 @@ def select_latest_acquisition(
     previously verified collection interval. The caller records this fallback
     explicitly; it is never presented as an exact project/date join.
     """
+    city_tiles = city_tiles.copy()
+    city_tiles["selection_project"] = city_tiles["download_url"].map(project_key_from_url)
+    if city_tiles["selection_project"].eq("").any():
+        raise RuntimeError("One or more USGS tile URLs lack a recognizable project path")
     candidates = []
-    for project, rows in city_tiles.groupby("project_directory"):
+    for project, rows in city_tiles.groupby("selection_project"):
         if not project:
             continue
         official_end = dates.get(project, {}).get("end", "")
@@ -454,13 +473,13 @@ def select_latest_acquisition(
         coverage = 0.0
         for _, project, _ in candidates:
             projects.append(project)
-            chosen = city_tiles[city_tiles["project_directory"].isin(projects)]
+            chosen = city_tiles[city_tiles["selection_project"].isin(projects)]
             coverage = coverage_percent(aoi, chosen)
             if coverage >= MINIMUM_COVERAGE_PERCENT:
                 break
     if coverage < MINIMUM_COVERAGE_PERCENT:
         raise RuntimeError(f"Latest dated project set covers only {coverage:.6f}% of AOI")
-    selected = city_tiles[city_tiles["project_directory"].isin(projects)].copy()
+    selected = city_tiles[city_tiles["selection_project"].isin(projects)].copy()
     exact_starts = [dates[project]["start"] for project in projects if dates.get(project, {}).get("start")]
     exact_ends = [dates[project]["end"] for project in projects if dates.get(project, {}).get("end")]
     if len(exact_ends) == len(projects):

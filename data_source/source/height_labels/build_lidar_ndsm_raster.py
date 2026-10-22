@@ -512,19 +512,42 @@ def audit_point_classifications(
     return dict(totals)
 
 
-def point_crs_from_header(header: Any, tile_path: Path) -> Any:
-    """Read CRS from a LAS/LAZ header and reject unknown global source CRSs."""
+US_SURVEY_FOOT_TO_METRE = 1200.0 / 3937.0
+DOCUMENTED_POINT_CRS_FALLBACKS = {
+    # USGS WESM metadata: horiz_crs=2891; legacy delivery elevations are feet.
+    "KY_KENTON_CAMBELLCO_2007": (2891, US_SURVEY_FOOT_TO_METRE),
+    # USGS WESM metadata: horiz_crs=3424; project report documents feet.
+    "NJ_MERCERCO_2009": (3424, US_SURVEY_FOOT_TO_METRE),
+    # USGS WESM metadata: horiz_crs=6347 and vertical CRS 5703 (metres).
+    "NJ_New_Jersey_SANDY_LiDAR_15": (6347, 1.0),
+    "NY_New_York_CMGP_SANDY_LiDAR_15": (6347, 1.0),
+}
+
+
+def point_crs_from_header(header: Any, tile_path: Path) -> tuple[Any, float]:
+    """Read source CRS and return its documented vertical-to-metre scale."""
     import pyproj
 
+    normalized = tile_path.as_posix().lower()
+    documented = next(
+        (
+            (project, epsg, z_scale)
+            for project, (epsg, z_scale) in DOCUMENTED_POINT_CRS_FALLBACKS.items()
+            if project.lower() in normalized
+        ),
+        None,
+    )
     crs = header.parse_crs()
     if crs is not None:
-        return crs
+        return crs, documented[2] if documented else 1.0
 
-    # These already-validated legacy NYC Sandy files lack embedded CRS metadata.
-    # Do not apply this local exception to other countries or projects.
-    if "NY_New_York_CMGP_SANDY_LiDAR_15" in tile_path.as_posix():
-        logging.warning("Using documented EPSG:6347 fallback for %s", relative_path(tile_path))
-        return pyproj.CRS.from_epsg(6347)
+    if documented:
+        project, epsg, z_scale = documented
+        logging.warning(
+            "Using documented EPSG:%s and z-scale %.12f fallback for %s",
+            epsg, z_scale, relative_path(tile_path),
+        )
+        return pyproj.CRS.from_epsg(epsg), z_scale
     raise RuntimeError(
         f"Point cloud has no embedded CRS: {tile_path}. Supply a CRS-corrected "
         "source file; the script will not guess a projection."
@@ -581,7 +604,7 @@ def accumulate_lidar_surfaces(
     for tile_index, tile_path in enumerate(tile_paths, start=1):
         logging.info("Reading tile %s/%s: %s", tile_index, len(tile_paths), relative_path(tile_path))
         laz = laspy.read(tile_path)
-        point_crs = point_crs_from_header(laz.header, tile_path)
+        point_crs, z_scale = point_crs_from_header(laz.header, tile_path)
         key = (point_crs.to_string(), template_crs.to_string())
         if transformer is None or key != transformer_key:
             transformer = pyproj.Transformer.from_crs(point_crs, template_crs, always_xy=True)
@@ -589,7 +612,7 @@ def accumulate_lidar_surfaces(
 
         x = np.asarray(laz.x)
         y = np.asarray(laz.y)
-        z = np.asarray(laz.z, dtype=np.float32)
+        z = np.asarray(laz.z, dtype=np.float32) * np.float32(z_scale)
         classification = np.asarray(laz.classification)
 
         x_proj, y_proj = transformer.transform(x, y)
