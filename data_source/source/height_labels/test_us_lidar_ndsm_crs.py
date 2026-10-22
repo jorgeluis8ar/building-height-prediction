@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Regression tests for USGS legacy project grouping and CRS fallbacks."""
 
-from pathlib import Path
 import unittest
 
 import pyproj
@@ -41,26 +40,27 @@ class USLidarNdsmCrsTest(unittest.TestCase):
 
     def test_documented_legacy_crs_and_vertical_units(self):
         crs, scale = builder.point_crs_from_header(
-            EmptyCrsHeader(), Path("KY_KENTON_CAMBELLCO_2007/tile.laz")
+            EmptyCrsHeader(), builder.PROJECT_ROOT / "KY_KENTON_CAMBELLCO_2007/tile.laz"
         )
         self.assertEqual(crs.to_epsg(), 2891)
         self.assertAlmostEqual(scale, 1200.0 / 3937.0)
 
         crs, scale = builder.point_crs_from_header(
-            EmptyCrsHeader(), Path("NJ_MERCERCO_2009/tile.laz")
+            EmptyCrsHeader(), builder.PROJECT_ROOT / "NJ_MERCERCO_2009/tile.laz"
         )
         self.assertEqual(crs.to_epsg(), 3424)
         self.assertAlmostEqual(scale, 1200.0 / 3937.0)
 
         crs, scale = builder.point_crs_from_header(
-            EmptyCrsHeader(), Path("NJ_New_Jersey_SANDY_LiDAR_15/tile.laz")
+            EmptyCrsHeader(), builder.PROJECT_ROOT / "NJ_New_Jersey_SANDY_LiDAR_15/tile.laz"
         )
         self.assertEqual(crs.to_epsg(), 6347)
         self.assertEqual(scale, 1.0)
 
     def test_documented_vertical_scale_applies_with_embedded_crs(self):
         crs, scale = builder.point_crs_from_header(
-            EmbeddedCrsHeader(2891), Path("KY_KENTON_CAMBELLCO_2007/tile.laz")
+            EmbeddedCrsHeader(2891),
+            builder.PROJECT_ROOT / "KY_KENTON_CAMBELLCO_2007/tile.laz",
         )
         self.assertEqual(crs.to_epsg(), 2891)
         self.assertAlmostEqual(scale, 1200.0 / 3937.0)
