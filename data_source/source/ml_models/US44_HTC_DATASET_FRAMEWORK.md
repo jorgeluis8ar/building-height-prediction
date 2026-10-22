@@ -322,6 +322,35 @@ dir data_source\data\ml_models\generated\htc_dc_net\us_44_rgbnir_8scene_v1\visua
 The validation stage is successful only when it finishes without an exception
 and `pipeline_status.json` reports success.
 
+## LiDAR Provenance Report
+
+Generate a reproducible record of the USGS projects and acquisition dates used
+by exactly the original 44-city dataset:
+
+```cmd
+data_source\source\height_labels\venv_height_labels\Scripts\python.exe data_source\source\height_labels\report_us_lidar_provenance.py
+```
+
+The command reads the authoritative 44-city scene universe and the nDSM run
+manifest. When the USGS metadata service is available, it refreshes exact
+project-level acquisition dates and horizontal CRS codes. It writes:
+
+```text
+data_source\data\height_labels\generated\us_training_planet_ndsm\provenance\us44_v1\us44_lidar_city_provenance.csv
+data_source\data\height_labels\generated\us_training_planet_ndsm\provenance\us44_v1\us44_lidar_project_provenance.csv
+data_source\data\height_labels\generated\us_training_planet_ndsm\provenance\us44_v1\provenance_summary.json
+```
+
+Display the compact city-level table from CMD:
+
+```cmd
+data_source\source\ml_models\venv_htc_dc_net\Scripts\python.exe -c "import pandas as pd; p=r'data_source\data\height_labels\generated\us_training_planet_ndsm\provenance\us44_v1\us44_lidar_city_provenance.csv'; d=pd.read_csv(p,dtype=str).fillna(''); print(d[['city_slug','selected_project_directories','lidar_collect_start','lidar_collect_end','lidar_acquisition_years','status']].to_string(index=False))"
+```
+
+Use `--offline` only when the USGS metadata service is unavailable. The offline
+report retains the city-level dates recorded during nDSM creation but cannot
+refresh separate dates and CRS codes for every selected project.
+
 ## 9. Safe Recovery
 
 For an interrupted canonical-chip, alignment, or dataset-copy stage, rerun the
