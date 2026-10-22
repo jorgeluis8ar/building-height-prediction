@@ -236,6 +236,18 @@ def parse_args() -> argparse.Namespace:
         help="Delete manifest-listed LAZ files only after validated nDSM success.",
     )
     parser.add_argument("--city-slug", action="append", dest="city_slugs")
+    parser.add_argument(
+        "--selected-scenes",
+        type=Path,
+        default=SELECTED_SCENES_PATH,
+        help="Selected Planet scene metadata CSV (default: original training selection).",
+    )
+    parser.add_argument(
+        "--planet-root",
+        type=Path,
+        default=PLANET_ROOT,
+        help="Root containing downloaded Planet scenes grouped by city slug.",
+    )
     parser.add_argument("--city-offset", type=int, default=0)
     parser.add_argument("--city-limit", type=int, default=1)
     parser.add_argument("--minimum-free-gb", type=float, default=100.0)
@@ -790,7 +802,21 @@ def checkpoint(records: dict[str, dict[str, Any]]) -> None:
 
 
 def main() -> None:
+    global SELECTED_SCENES_PATH, PLANET_ROOT
     args = parse_args()
+    SELECTED_SCENES_PATH = (
+        args.selected_scenes.resolve()
+        if args.selected_scenes.is_absolute()
+        else (PROJECT_ROOT / args.selected_scenes).resolve()
+    )
+    PLANET_ROOT = (
+        args.planet_root.resolve()
+        if args.planet_root.is_absolute()
+        else (PROJECT_ROOT / args.planet_root).resolve()
+    )
+    for path in (SELECTED_SCENES_PATH, PLANET_ROOT):
+        if not path.is_relative_to(PROJECT_ROOT):
+            raise ValueError(f"Input path must remain inside repository: {path}")
     log_path = start_log()
     print(f"Run log: {relative(log_path)}", flush=True)
     if args.confirm_delete_lidar and not args.confirm_download:
